@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>後の先 — 捕食者・被食者シミュレーション × 強化学習</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --border: #1f2937;
+    --accent: #22d3ee;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --text: #e2e8f0;
+    --muted: #6b7280;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', 'Segoe UI', sans-serif;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 80px 24px 60px;
+    text-align: center;
+    background: radial-gradient(ellipse at 50% 0%, #0f1e3d 0%, var(--bg) 65%);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      radial-gradient(circle at 20% 50%, rgba(34,211,238,0.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 50%, rgba(167,139,250,0.06) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .badge {
+    display: inline-block;
+    background: rgba(34,211,238,0.12);
+    border: 1px solid rgba(34,211,238,0.3);
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 24px;
+    text-transform: uppercase;
+  }
+  .hero h1 {
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }
+  .hero h1 .en {
+    font-size: 0.55em;
+    color: var(--accent);
+    display: block;
+    letter-spacing: 0.08em;
+    font-weight: 400;
+  }
+  .hero p {
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 540px;
+    margin: 20px auto 0;
+  }
+  .concept-row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 32px;
+  }
+  .chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .chip.hl { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Main ── */
+  main { max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
+
+  /* ── Concept Block ── */
+  .concept-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 28px 32px;
+    margin-bottom: 56px;
+  }
+  .concept-block h2 {
+    font-size: 18px;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .concept-block p { color: var(--muted); font-size: 14px; }
+  .senpo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .senpo-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .senpo-item .label {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .senpo-item .desc { font-size: 12px; color: var(--muted); }
+  .senpo-item.s1 .label { color: var(--accent2); }
+  .senpo-item.s2 .label { color: var(--accent); }
+  .senpo-item.s3 .label { color: var(--accent3); }
+
+  /* ── Stage Cards ── */
+  h2.section-title {
+    font-size: 20px;
+    color: var(--text);
+    margin-bottom: 24px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-bottom: 56px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: transform 0.2s, border-color 0.2s;
+    text-decoration: none;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+  .card:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .card-stage {
+    padding: 10px 18px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .card.s1 .card-stage { background: rgba(167,139,250,0.15); color: var(--accent2); }
+  .card.s2 .card-stage { background: rgba(34,211,238,0.12); color: var(--accent); }
+  .card.s3 .card-stage { background: rgba(52,211,153,0.12); color: var(--accent3); }
+  .card-visual {
+    height: 110px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    background: rgba(255,255,255,0.02);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 0.1em;
+  }
+  .card-body { padding: 20px 18px; flex: 1; }
+  .card-body h3 { font-size: 16px; margin-bottom: 6px; }
+  .card-body p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .card-tech {
+    padding: 12px 18px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border);
+  }
+  .tag {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 2px 8px;
+    color: var(--muted);
+  }
+  .card-footer {
+    padding: 12px 18px;
+    text-align: right;
+    border-top: 1px solid var(--border);
+  }
+  .btn-play {
+    display: inline-block;
+    background: var(--accent);
+    color: #000;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 7px 20px;
+    border-radius: 20px;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+  .btn-play:hover { opacity: 0.85; }
+  .card.s2 .btn-play { background: var(--accent); }
+  .card.s3 .btn-play { background: var(--accent3); }
+
+  /* ── Regional Message ── */
+  .message-block {
+    background: linear-gradient(135deg, rgba(167,139,250,0.08), rgba(34,211,238,0.06));
+    border: 1px solid rgba(167,139,250,0.2);
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 56px;
+    text-align: center;
+  }
+  .message-block h2 { font-size: 20px; margin-bottom: 14px; }
+  .message-block p { color: var(--muted); font-size: 14px; max-width: 600px; margin: 0 auto 20px; }
+  .message-block a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(34,211,238,0.4);
+  }
+
+  /* ── Footer ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .footer-links { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<!-- ══ HERO ══ -->
+<div class="hero">
+  <div class="badge">Predator &amp; Prey Simulation × Reinforcement Learning</div>
+  <h1>
+    後の先
+    <span class="en">Go-no-sen</span>
+  </h1>
+  <p>自然界の攻防戦シミュレーションから<br>地域ビジネスの生存戦略を考える</p>
+  <div class="concept-row">
+    <span class="chip hl">Three.js WebGL</span>
+    <span class="chip">Q学習 / DQN</span>
+    <span class="chip">Reynolds操舵</span>
+    <span class="chip">共進化</span>
+    <span class="chip">地域課題</span>
+  </div>
+</div>
+
+<!-- ══ MAIN ══ -->
+<main>
+
+  <!-- 後の先とは -->
+  <div class="concept-block">
+    <h2>剣道・居合道でいう「後の先」とは</h2>
+    <p>先に動いた相手の「確定した軌跡」を読み、相手が引けなくなった瞬間に最適な反撃を繰り出す——剣術の極意が、強化学習エージェントの学習過程で<strong style="color:var(--text)">自発的に出現するかどうか</strong>を検証します。</p>
+    <div class="senpo-grid">
+      <div class="senpo-item s1">
+        <div class="label">先の先（せんのせん）</div>
+        <div class="desc">先に動く。高リスク・高リターン。ハチドリの奇襲潜航。</div>
+      </div>
+      <div class="senpo-item s2">
+        <div class="label">後の先（ごのせん）</div>
+        <div class="desc">相手がコミットした後に仕掛ける。チーターの転換後捕捉。</div>
+      </div>
+      <div class="senpo-item s3">
+        <div class="label">先々の先（せんせんのせん）</div>
+        <div class="desc">相手の意図を先読みして先手。最高難度の予測戦略。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stage Cards -->
+  <h2 class="section-title">シミュレーション</h2>
+  <div class="cards">
+
+    <!-- Stage 1 -->
+    <a class="card s1" href="stage1.html">
+      <div class="card-stage">Stage 1 — Heuristic</div>
+      <div class="card-visual">🐆🦌</div>
+      <div class="card-body">
+        <h3>チーター vs インパラ</h3>
+        <p>Reynolds操舵と有限状態機械による本能的な追跡・逃避行動。予測追跡（Pursuit Steering）とジグザグ回避の攻防。</p>
+      </div>
+      <div class="card-tech">
+        <span class="tag">Reynolds操舵</span>
+        <span class="tag">FSM</span>
+        <span class="tag">予測追跡</span>
+      </div>
+      <div class="card-footer">
+        <span class="btn-play" style="background:var(--accent2)">▶ 開く</span>
+      </div>
+    </a>
+
+    <!-- Stage 2/3 -->
+    <a class="card s2" href="stage2.html">
+      <div class="card-stage">Stage 2/3 — Reinforcement Learning</div>
+      <div class="card-visual">🤖🦌</div>
+      <div class="card-body">
+        <h3>チーター（DQN）vs インパラ</h3>
+        <p>捕食者をQ学習→DQNに置換。<strong style="color:var(--accent)">後の先</strong>メトリクス（待機率・転換後捕捉率）が学習とともに上昇する様子を観察。</p>
+      </div>
+      <div class="card-tech">
+        <span class="tag">Q-Learning</span>
+        <span class="tag">DQN</span>
+        <span class="tag">後の先指標</span>
+      </div>
+      <div class="card-footer">
+        <span class="btn-play">▶ 開く</span>
+      </div>
+    </a>
+
+    <!-- Stage 3 Aerial -->
+    <a class="card s3" href="stage3.html">
+      <div class="card-stage">Stage 3 — 3D Aerial Co-evolution</div>
+      <div class="card-visual">🦅🦗</div>
+      <div class="card-body">
+        <h3>ハチドリ vs トンボ</h3>
+        <p>双方がDQN学習する3D空中戦。非定常環境での<strong style="color:var(--accent3)">共進化（Arms Race）</strong>と、高度優位を活かした先々の先戦略の出現を観察。</p>
+      </div>
+      <div class="card-tech">
+        <span class="tag">双方向DQN</span>
+        <span class="tag">3D物理</span>
+        <span class="tag">共進化</span>
+        <span class="tag">Arms Race</span>
+      </div>
+      <div class="card-footer">
+        <span class="btn-play">▶ 開く</span>
+      </div>
+    </a>
+
+  </div>
+
+  <!-- Regional Message -->
+  <div class="message-block">
+    <h2>🐸 ゆでカエル、になっていませんか？</h2>
+    <p>自然界には「現状維持バイアス」は存在しません。すべての生物は毎瞬間、最適な意思決定を学習し続けています。地域経済の停滞を「ゆでカエル状態」と捉え、自然界の攻防戦から生存戦略を学ぶ——そのきっかけとなるシミュレーションです。</p>
+    <p>
+      <a href="https://qiita.com/advent-calendar/2026/turtle-walkers" target="_blank">
+        📖 Qiita Advent Calendar 2026 — 地域課題 × テクノロジー
+      </a>
+    </p>
+  </div>
+
+</main>
+
+<!-- ══ FOOTER ══ -->
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/keith-river/go-no-sen" target="_blank">GitHub</a>
+    <a href="https://qiita.com/advent-calendar/2026/turtle-walkers" target="_blank">Advent Calendar</a>
+    <a href="stage1.html">Stage 1</a>
+    <a href="stage2.html">Stage 2/3</a>
+    <a href="stage3.html">Stage 3 Aerial</a>
+  </div>
+  <div>© 2026 keithrive — MIT License</div>
+</footer>
+
+</body>
+</html>

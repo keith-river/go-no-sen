@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>捕食者-被食者 RL | 後の先の創発 Stage 2&3</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#060810; font-family:'Courier New',monospace; overflow:hidden; color:#ccc; }
+#c { position:fixed; inset:0; }
+
+/* ── パネル共通 ── */
+.panel {
+  position:fixed; top:10px; background:rgba(6,8,16,0.9);
+  border:1px solid rgba(100,150,255,0.18); border-radius:8px;
+  padding:11px; font-size:11px; backdrop-filter:blur(6px); z-index:100;
+}
+#lp { left:10px; width:222px; display:flex; flex-direction:column; gap:9px; }
+#rp { right:10px; width:228px; display:flex; flex-direction:column; gap:9px; }
+
+.stitle { font-size:10px; color:#7af; text-transform:uppercase; letter-spacing:1.1px; margin-bottom:5px; }
+.sec { border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:8px; }
+.sec:last-child { border-bottom:none; padding-bottom:0; }
+
+/* 動物行 */
+.arow { display:flex; align-items:center; gap:7px; margin-bottom:7px; }
+.dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.ainfo { flex:1; }
+.ahead { display:flex; justify-content:space-between; margin-bottom:2px; }
+.sbadge { font-size:9px; padding:1px 5px; border-radius:3px; font-weight:bold; color:#fff; }
+.ebg { height:5px; background:rgba(255,255,255,0.11); border-radius:3px; overflow:hidden; }
+.ebar { height:100%; border-radius:3px; transition:width .15s, background .3s; }
+.esub { font-size:9px; color:#555; margin-top:2px; }
+
+/* RL ステータス行 */
+.rlrow { display:flex; justify-content:space-between; margin-bottom:2px; font-size:10.5px; }
+.rlv { color:#adf; font-variant-numeric:tabular-nums; }
+
+/* ボタン */
+.btns { display:flex; gap:5px; flex-wrap:wrap; }
+button {
+  background:rgba(70,110,255,0.16); border:1px solid rgba(70,110,255,0.32);
+  color:#aad; padding:4px 7px; border-radius:4px;
+  cursor:pointer; font-size:10px; font-family:inherit;
+}
+button:hover { background:rgba(70,110,255,0.38); }
+button.active { background:rgba(70,200,120,0.25); border-color:rgba(70,200,120,0.5); color:#8fa; }
+
+input[type=range] { width:100%; accent-color:#7af; }
+#spd-lbl { text-align:center; font-size:10px; color:#adf; margin-top:1px; }
+
+/* ── 後の先 メトリクス ── */
+.metric-bar-bg { height:10px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden; margin-bottom:1px; }
+.metric-bar { height:100%; border-radius:4px; transition:width .8s; }
+.metric-label { display:flex; justify-content:space-between; font-size:10px; margin-bottom:3px; }
+
+/* キャンバス */
+canvas.graph { width:100%; height:64px; border-radius:4px; display:block; }
+
+/* モード切替 */
+.mode-tabs { display:flex; gap:4px; margin-bottom:6px; }
+.mode-tab {
+  flex:1; text-align:center; padding:4px; border-radius:4px; cursor:pointer;
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  font-size:10px; color:#888; transition:.2s;
+}
+.mode-tab.on { background:rgba(100,170,255,0.2); border-color:rgba(100,170,255,0.5); color:#adf; }
+
+#foot { position:fixed; bottom:8px; left:10px; font-size:9px; color:rgba(180,200,255,0.4); z-index:100; }
+#camlab { position:fixed; bottom:8px; right:10px; font-size:10px; color:rgba(180,200,255,0.55);
+  background:rgba(0,0,0,0.4); padding:3px 8px; border-radius:4px; z-index:100; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- ── 左パネル ── -->
+<div class="panel" id="lp">
+  <div class="sec">
+    <div class="stitle">🐆 後の先 創発 RL Sim</div>
+    <div class="mode-tabs">
+      <div class="mode-tab on" id="tab-q" onclick="setMode('Q')">Stage 2<br><small>Q-table</small></div>
+      <div class="mode-tab"    id="tab-d" onclick="setMode('D')">Stage 3<br><small>DQN</small></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">動物状態</div>
+    <div class="arow">
+      <div class="dot" style="background:#ff6644"></div>
+      <div class="ainfo">
+        <div class="ahead"><span>チーター (RL)</span><span class="sbadge" id="p-badge" style="background:#555">—</span></div>
+        <div class="ebg"><div class="ebar" id="p-ebar" style="width:100%;background:#ff6644"></div></div>
+        <div class="esub">エネルギー <span id="p-epct">100</span>%</div>
+      </div>
+    </div>
+    <div class="arow">
+      <div class="dot" style="background:#44dd88"></div>
+      <div class="ainfo">
+        <div class="ahead"><span>インパラ (Heuristic)</span><span class="sbadge" id="q-badge" style="background:#226644">GRAZE</span></div>
+        <div class="ebg"><div class="ebar" id="q-ebar" style="width:100%;background:#44dd88"></div></div>
+        <div class="esub">スタミナ <span id="q-epct">100</span>%</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#aaa">距離: <span id="dist-v" style="color:#adf">-- m</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">RL ステータス</div>
+    <div class="rlrow"><span>エピソード</span><span class="rlv" id="rl-ep">0</span></div>
+    <div class="rlrow"><span>探索率 ε</span><span class="rlv" id="rl-eps">1.000</span></div>
+    <div class="rlrow"><span>捕獲 / 試行</span><span class="rlv" id="rl-cr">0/0</span></div>
+    <div class="rlrow"><span>直近報酬</span><span class="rlv" id="rl-rw">—</span></div>
+    <div class="rlrow"><span>Qテーブル状態数</span><span class="rlv" id="rl-qs">0</span></div>
+    <div class="rlrow"><span>エピソード時間</span><span class="rlv" id="rl-et">0 s</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">速度</div>
+    <input type="range" id="spd" min="1" max="40" step="1" value="8">
+    <div id="spd-lbl">8 ×（訓練高速化）</div>
+  </div>
+
+  <div class="sec btns">
+    <button id="btn-rst">リセット</button>
+    <button id="btn-pause">⏸ 停止</button>
+    <button id="btn-cam">カメラ ▶</button>
+    <button id="btn-test" onclick="toggleTest()">🎯 テストモード</button>
+  </div>
+</div>
+
+<!-- ── 右パネル ── -->
+<div class="panel" id="rp">
+  <div class="sec">
+    <div class="stitle">後の先 創発指標</div>
+    <div style="font-size:9px;color:#555;margin-bottom:6px">直近30捕獲の平均（学習進度により上昇）</div>
+
+    <div class="metric-label"><span>① 待機-仕掛け率</span><span id="m1v" style="color:#adf">0%</span></div>
+    <div class="metric-bar-bg"><div class="metric-bar" id="m1b" style="width:0%;background:#7af"></div></div>
+    <div style="font-size:9px;color:#444;margin-bottom:6px">捕獲前1.5s間、低速の割合 → 大=待機後スプリント</div>
+
+    <div class="metric-label"><span>② 角度遮断率</span><span id="m2v" style="color:#adf">0%</span></div>
+    <div class="metric-bar-bg"><div class="metric-bar" id="m2b" style="width:0%;background:#fa0"></div></div>
+    <div style="font-size:9px;color:#444;margin-bottom:6px">捕獲時、獲物の正面から迫った割合 → 先読み遮断</div>
+
+    <div class="metric-label"><span>③ 転換直後捕獲率</span><span id="m3v" style="color:#adf">0%</span></div>
+    <div class="metric-bar-bg"><div class="metric-bar" id="m3b" style="width:0%;background:#f84"></div></div>
+    <div style="font-size:9px;color:#444;margin-bottom:6px">獲物が方向転換後1.2s以内に捕獲 → 「機」を捉える</div>
+
+    <div class="metric-label"><span>④ エネルギー効率</span><span id="m4v" style="color:#adf">0%</span></div>
+    <div class="metric-bar-bg"><div class="metric-bar" id="m4b" style="width:0%;background:#4fa"></div></div>
+    <div style="font-size:9px;color:#444;margin-bottom:0">捕獲時の残エネルギー → 高=最小労力の「妙手」</div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">学習曲線（エピソード報酬）</div>
+    <canvas class="graph" id="rw-graph" width="206" height="64"></canvas>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">捕獲率推移</div>
+    <canvas class="graph" id="cr-graph" width="206" height="52"></canvas>
+  </div>
+
+  <div class="sec" style="font-size:9px;color:#445;line-height:1.6">
+    <div style="color:#667;margin-bottom:3px">【後の先とは】</div>
+    相手が動作を確定させた直後に反応する。<br>
+    先手(sen)=先読みスプリント → 獲物のジグザグに振られる<br>
+    後の先(go-no-sen)=転換後即遮断 → 最小エネルギーで捕獲
+  </div>
+</div>
+
+<div id="foot">マウスドラッグ:回転 | ホイール:ズーム | 高速倍率でエピソードを多数回す</div>
+<div id="camlab">📷 フリーカメラ</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════
+// 定数
+// ════════════════════════════════════════════════
+const WORLD = 120;
+const CATCH_D = 3.2;
+const SIM_DT = 0.07;          // 固定刻み (秒)
+const EP_MAX  = 65;           // エピソード最長 (秒)
+const TRAIL_LEN = 120;
+
+// アクション: 8絶対方位 × 3速度 + 待機 = 25
+const N_ACT = 25;
+const SPEEDS = [4, 11, 26];   // m/s: 歩行 / トロット / スプリント
+const ACTIONS = (() => {
+  const a = [];
+  for (let d=0;d<8;d++) for (let s=0;s<3;s++)
+    a.push({ dir: d*Math.PI/4, spd: s });
+  a.push({ dir:null, spd:-1 }); // wait
+  return a;
+})();
+
+// エネルギー増減 (per second)
+const E_DELTA = [0.012, -0.003, -(1/9)];
+const E_WAIT  =  0.018;
+
+// チーター物理
+const P_MASS = 1.2, P_MAXF = 52;
+// インパラ (ヒューリスティック)
+const Q_CFG = {
+  walkSpd:3, fleeSpd:21, mass:0.85, maxF:65,
+  detR:56, panicR:26, safeR:82,
+  sDrain:1/13, sRecover:1/8,
+  zigInt:[0.3,1.0], zigAng:Math.PI*0.68,
+};
+
+// ════════════════════════════════════════════════
+// Three.js セットアップ
+// ════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.88;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x7ab8d0);
+scene.fog = new THREE.FogExp2(0x9ac8e0, 0.007);
+
+const cam = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.2, 600);
+cam.position.set(0, 85, 130);
+cam.lookAt(0,0,0);
+
+// ライト
+scene.add(new THREE.AmbientLight(0xfff5e0, 0.5));
+const sun = new THREE.DirectionalLight(0xfffae8, 1.2);
+sun.position.set(55,115,38); sun.castShadow = true;
+sun.shadow.mapSize.setScalar(1024);
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 500;
+['left','right','top','bottom'].forEach((k,i)=>{ sun.shadow.camera[k]=[-200,200,200,-200][i]; });
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xb0d8ff, 0x887055, 0.35));
+
+// 地形
+const gGeo = new THREE.PlaneGeometry(WORLD*2.4, WORLD*2.4, 55, 55);
+const gPos = gGeo.attributes.position;
+for (let i=0;i<gPos.count;i++){
+  const x=gPos.getX(i), z=gPos.getY(i);
+  gPos.setZ(i,
+    Math.sin(x*.024)*Math.cos(z*.027)*2.5
+    + Math.sin(x*.058+1.3)*Math.sin(z*.052+0.7)*1.3
+    + Math.cos(x*.01+z*.011)*0.9
+  );
+}
+gGeo.computeVertexNormals();
+const gnd = new THREE.Mesh(gGeo, new THREE.MeshLambertMaterial({ color:0x9a8060 }));
+gnd.rotation.x = -Math.PI/2; gnd.receiveShadow = true; scene.add(gnd);
+
+const grid = new THREE.GridHelper(WORLD*2.4, 22, 0x443322, 0x332211);
+grid.position.y = 0.08; grid.material.opacity = 0.2; grid.material.transparent = true;
+scene.add(grid);
+
+// 境界
+const beg = new THREE.EdgesGeometry(new THREE.BoxGeometry(WORLD*2,0.1,WORLD*2));
+const bel = new THREE.LineSegments(beg, new THREE.LineBasicMaterial({color:0x665544,opacity:0.35,transparent:true}));
+bel.position.y=0.1; scene.add(bel);
+
+// 樹木
+function buildTrees(){
+  const tMat = new THREE.MeshLambertMaterial({color:0x6b4226});
+  const lMats = [0x3a6b3a, 0x4a8b50, 0x557a3a].map(c=>new THREE.MeshLambertMaterial({color:c}));
+  for(let i=0;i<20;i++){
+    const x=(Math.random()-.5)*(WORLD*1.85), z=(Math.random()-.5)*(WORLD*1.85);
+    const h=5+Math.random()*9;
+    const g=new THREE.Group();
+    const t=new THREE.Mesh(new THREE.CylinderGeometry(.27,.48,h,7),tMat);
+    t.position.y=h/2; t.castShadow=true; g.add(t);
+    const lh=4+Math.random()*5;
+    const l=new THREE.Mesh(new THREE.ConeGeometry(3.2+Math.random()*2,lh,8),lMats[i%3]);
+    l.position.y=h+lh/2-1; l.castShadow=true; g.add(l);
+    g.position.set(x,0,z); scene.add(g);
+  }
+}
+buildTrees();
+
+// ════════════════════════════════════════════════
+// カメラ制御
+// ════════════════════════════════════════════════
+let camTheta=0.3, camPhi=0.72, camR=155;
+const camTgt=new THREE.Vector3(), camCurPos=new THREE.Vector3(0,85,130);
+let camMode=0, dragging=false, lmx=0, lmy=0;
+const CAM_NAMES=['📷 フリーカメラ','🔴 チーター追跡','🟢 インパラ追跡','🦅 俯瞰'];
+
+canvas.addEventListener('pointerdown',e=>{dragging=true;lmx=e.clientX;lmy=e.clientY;});
+canvas.addEventListener('pointerup',()=>dragging=false);
+canvas.addEventListener('pointermove',e=>{
+  if(!dragging||camMode!==0) return;
+  camTheta-=(e.clientX-lmx)*.004;
+  camPhi=Math.max(.08,Math.min(1.4,camPhi+(e.clientY-lmy)*.004));
+  lmx=e.clientX; lmy=e.clientY;
+});
+canvas.addEventListener('wheel',e=>{ camR=Math.max(18,Math.min(320,camR+e.deltaY*.12)); });
+
+function tickCamera(){
+  let tp, pos;
+  if(camMode===0){
+    tp=new THREE.Vector3(0,0,0);
+    pos=new THREE.Vector3(
+      camR*Math.sin(camTheta)*Math.cos(camPhi),
+      camR*Math.sin(camPhi),
+      camR*Math.cos(camTheta)*Math.cos(camPhi)
+    );
+  } else if(camMode===1&&pred){
+    tp=pred.pos.clone();
+    const bk=pred.vel.length()>.5?pred.vel.clone().normalize().multiplyScalar(-32):new THREE.Vector3(0,0,32);
+    pos=pred.pos.clone().add(bk).add(new THREE.Vector3(0,22,0));
+  } else if(camMode===2&&prey){
+    tp=prey.pos.clone();
+    const bk=prey.vel.length()>.5?prey.vel.clone().normalize().multiplyScalar(-26):new THREE.Vector3(0,0,26);
+    pos=prey.pos.clone().add(bk).add(new THREE.Vector3(0,18,0));
+  } else {
+    tp=new THREE.Vector3(0,0,0); pos=new THREE.Vector3(0,220,0);
+  }
+  camCurPos.lerp(pos,.06); camTgt.lerp(tp,.06);
+  cam.position.copy(camCurPos); cam.lookAt(camTgt);
+}
+
+// ════════════════════════════════════════════════
+// ステアリングライブラリ
+// ════════════════════════════════════════════════
+function steerSeek(pos,vel,tgt,spd,mf){
+  const d=tgt.clone().sub(pos); if(d.lengthSq()<.0001)return new THREE.Vector3();
+  return d.normalize().multiplyScalar(spd).sub(vel).clampLength(0,mf);
+}
+function steerFlee(pos,vel,from,spd,mf){
+  const d=pos.clone().sub(from); if(d.lengthSq()<.0001)return new THREE.Vector3();
+  return d.normalize().multiplyScalar(spd).sub(vel).clampLength(0,mf);
+}
+function steerEvasion(pos,vel,oPos,oVel,spd,mf){
+  const to=oPos.clone().sub(pos);
+  const t=Math.min(to.length()/(spd+oVel.length()+.01),2.2);
+  return steerFlee(pos,vel,oPos.clone().add(oVel.clone().multiplyScalar(t)),spd,mf);
+}
+function steerWander(vel,ref,str){
+  ref.ang=(ref.ang||0)+(Math.random()-.5)*1.4;
+  const fwd=vel.length()>.2?vel.clone().normalize().multiplyScalar(2.5):new THREE.Vector3(Math.random()-.5,0,Math.random()-.5);
+  return fwd.add(new THREE.Vector3(Math.cos(ref.ang),0,Math.sin(ref.ang))).normalize().multiplyScalar(str);
+}
+function steerBnd(pos,mf){
+  const mg=22, lm=WORLD-mg, f=new THREE.Vector3();
+  if(pos.x<-lm)f.x=1; else if(pos.x>lm)f.x=-1;
+  if(pos.z<-lm)f.z=1; else if(pos.z>lm)f.z=-1;
+  const d=Math.max(Math.abs(pos.x)-lm,Math.abs(pos.z)-lm,0);
+  return d>0?f.multiplyScalar(mf*Math.min(d/mg,1)*2.2):f;
+}
+function rotY(v,a){ return new THREE.Vector3(v.x*Math.cos(a)-v.z*Math.sin(a),0,v.x*Math.sin(a)+v.z*Math.cos(a)); }
+function angDiff(a,b){ return((b-a+Math.PI*3)%(Math.PI*2))-Math.PI; }
+
+// ════════════════════════════════════════════════
+// トレイル・リング・矢印 ビルダー
+// ════════════════════════════════════════════════
+function makeTrail(col){
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(TRAIL_LEN*3),3));
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:col,opacity:.55,transparent:true}));
+  scene.add(line);
+  return{geo,line,pts:[]};
+}
+function pushTrail(tr,pos){
+  tr.pts.push(pos.clone()); if(tr.pts.length>TRAIL_LEN)tr.pts.shift();
+  const a=tr.geo.attributes.position, n=tr.pts.length;
+  for(let i=0;i<n;i++) a.setXYZ(i,tr.pts[i].x,.3,tr.pts[i].z);
+  const L=tr.pts[n-1]; for(let i=n;i<TRAIL_LEN;i++) a.setXYZ(i,L.x,.3,L.z);
+  tr.geo.setDrawRange(0,n); a.needsUpdate=true;
+}
+function makeRing(r,col){
+  const m=new THREE.Mesh(
+    new THREE.RingGeometry(r-.6,r,72),
+    new THREE.MeshBasicMaterial({color:col,side:THREE.DoubleSide,transparent:true,opacity:.15})
+  );
+  m.rotation.x=-Math.PI/2; m.position.y=.12; m.visible=false; scene.add(m); return m;
+}
+function makeArrow(col){
+  const a=new THREE.ArrowHelper(new THREE.Vector3(0,0,-1),new THREE.Vector3(0,2,0),6,col,1.2,.7);
+  a.visible=false; scene.add(a); return a;
+}
+
+// ════════════════════════════════════════════════
+// メッシュ生成
+// ════════════════════════════════════════════════
+function makePredMesh(){
+  const g=new THREE.Group();
+  const bm=new THREE.MeshLambertMaterial({color:0xff6644});
+  const hm=new THREE.MeshLambertMaterial({color:0xff9966});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.1,.75,2.6),bm);
+  body.position.y=1; body.castShadow=true; g.add(body);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(.3,.4,.8,7),bm);
+  neck.position.set(0,1.45,-1.1); neck.rotation.x=.35; g.add(neck);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.52,9,9),hm);
+  head.position.set(0,1.62,-1.7); head.castShadow=true; g.add(head);
+  const earM=new THREE.MeshLambertMaterial({color:0xdd5533});
+  [-0.28,0.28].forEach(ox=>{
+    const e=new THREE.Mesh(new THREE.ConeGeometry(.13,.38,5),earM);
+    e.position.set(ox,2.0,-1.65); g.add(e);
+  });
+  const eyeM=new THREE.MeshBasicMaterial({color:0xffee00});
+  [-0.22,0.22].forEach(ox=>{
+    const e=new THREE.Mesh(new THREE.SphereGeometry(.1,6,6),eyeM);
+    e.position.set(ox,1.75,-2.15); g.add(e);
+  });
+  const legM=new THREE.MeshLambertMaterial({color:0xcc5533});
+  [[-0.38,0,-0.7],[0.38,0,-0.7],[-0.38,0,0.7],[0.38,0,0.7]].forEach(([x,y,z])=>{
+    const l=new THREE.Mesh(new THREE.CylinderGeometry(.11,.11,.85,6),legM);
+    l.position.set(x,.53,z); g.add(l);
+  });
+  return{group:g,head};
+}
+function makePreyMesh(){
+  const g=new THREE.Group();
+  const bm=new THREE.MeshLambertMaterial({color:0x44dd88});
+  const hm=new THREE.MeshLambertMaterial({color:0x66ffaa});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.85,.7,1.9),bm);
+  body.position.y=1.05; body.castShadow=true; g.add(body);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(.24,.32,.9,7),bm);
+  neck.position.set(0,1.6,-.8); neck.rotation.x=.5; g.add(neck);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.42,9,9),hm);
+  head.position.set(0,1.92,-1.35); head.castShadow=true; g.add(head);
+  const hornM=new THREE.MeshLambertMaterial({color:0xeecc88});
+  [-0.18,0.18].forEach((ox,i)=>{
+    const h=new THREE.Mesh(new THREE.CylinderGeometry(.05,.07,1.2,5),hornM);
+    h.position.set(ox,2.95,-1.3); h.rotation.z=i===0?-.3:.3; h.rotation.x=-.2; g.add(h);
+  });
+  const earM=new THREE.MeshLambertMaterial({color:0x33bb77});
+  [-0.45,0.45].forEach(ox=>{
+    const e=new THREE.Mesh(new THREE.ConeGeometry(.12,.55,5),earM);
+    e.position.set(ox,2.1,-1.2); g.add(e);
+  });
+  const legM=new THREE.MeshLambertMaterial({color:0x33bb77});
+  [[-0.3,0,-.55],[0.3,0,-.55],[-0.3,0,.55],[0.3,0,.55]].forEach(([x,y,z])=>{
+    const l=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,.9,6),legM);
+    l.position.set(x,.55,z); g.add(l);
+  });
+  return{group:g,head};
+}
+
+// ════════════════════════════════════════════════
+// 状態エンコーダー (Q-table 用 離散)
+// ════════════════════════════════════════════════
+function encodeStateQ(pred, prey){
+  const diff=prey.pos.clone().sub(pred.pos);
+  const dist=diff.length();
+  const dB=Math.min(3,Math.floor(dist/28));                        // 0-3
+  const hdg=Math.atan2(pred.vel.z,pred.vel.x);
+  const toPrey=Math.atan2(diff.z,diff.x);
+  const relA=((toPrey-hdg+Math.PI*3)%(Math.PI*2));
+  const aB=Math.floor(relA/(Math.PI/4))%8;                         // 0-7
+  const preyA=((Math.atan2(prey.vel.z,prey.vel.x)+Math.PI*2)%(Math.PI*2));
+  const pB=prey.vel.length()>.4?Math.floor(preyA/(Math.PI/4))%8:8; // 0-8
+  const eB=pred.energy<.33?0:pred.energy<.66?1:2;                 // 0-2
+  const sB=prey.stamina<.45?0:1;                                   // 0-1
+  const tB=prey.recentlyTurned?1:0;                                // 0-1 ← 後の先の鍵
+  return `${dB},${aB},${pB},${eB},${sB},${tB}`;
+}
+
+// ════════════════════════════════════════════════
+// 状態エンコーダー (DQN 用 連続 10次元)
+// ════════════════════════════════════════════════
+function encodeStateD(pred, prey){
+  const diff=prey.pos.clone().sub(pred.pos);
+  const dist=diff.length();
+  const pva=Math.atan2(prey.vel.z,prey.vel.x);
+  const va=Math.atan2(pred.vel.z,pred.vel.x);
+  return new Float32Array([
+    diff.x/WORLD, diff.z/WORLD,
+    dist/WORLD,
+    Math.cos(pva), Math.sin(pva),
+    prey.vel.length()/21,
+    Math.cos(va), Math.sin(va),
+    pred.energy,
+    prey.recentlyTurned?1:0,
+  ]);
+}
+
+// ════════════════════════════════════════════════
+// Stage 2: Q-table エージェント
+// ════════════════════════════════════════════════
+class QAgent {
+  constructor(){
+    this.Q=Object.create(null);
+    this.alpha=0.14; this.gamma=0.95;
+    this.eps=1.0; this.epsDecay=0.993; this.epsMin=0.04;
+    this.episode=0; this.epR=0; this.rewardHist=[];
+    this.catchCount=0; this.trialCount=0;
+  }
+  _qs(s){ if(!this.Q[s]) this.Q[s]=new Float32Array(N_ACT); return this.Q[s]; }
+  best(s){ const q=this._qs(s); let b=0; for(let a=1;a<N_ACT;a++) if(q[a]>q[b])b=a; return b; }
+  act(s){ return Math.random()<this.eps?Math.floor(Math.random()*N_ACT):this.best(s); }
+  update(s,a,r,s2,done){
+    const q=this._qs(s);
+    const q2=this._qs(s2);
+    const maxQ2=done?0:Math.max(...q2);
+    q[a]+=this.alpha*(r+this.gamma*maxQ2-q[a]);
+    this.epR+=r;
+  }
+  endEp(result){
+    this.rewardHist.push(this.epR); this.epR=0;
+    if(result==='catch') this.catchCount++;
+    this.trialCount++;
+    this.eps=Math.max(this.epsMin,this.eps*this.epsDecay);
+    this.episode++;
+    if(this.rewardHist.length>200) this.rewardHist.shift();
+  }
+  stateCount(){ return Object.keys(this.Q).length; }
+  catchRate(){ return this.trialCount>0?this.catchCount/this.trialCount:0; }
+}
+
+// ════════════════════════════════════════════════
+// Stage 3: DQN (2層MLP + Adam + リプレイバッファ)
+// ════════════════════════════════════════════════
+function randn(s){ // Box-Muller
+  return Math.sqrt(-2*Math.log(Math.random()+1e-10))*Math.cos(2*Math.PI*Math.random())*s;
+}
+class MLP {
+  constructor(in_,h,out_){
+    const s1=Math.sqrt(2/in_), s2=Math.sqrt(2/h);
+    this.W1=Array.from({length:h},()=>Float32Array.from({length:in_},()=>randn(s1)));
+    this.b1=new Float32Array(h);
+    this.W2=Array.from({length:out_},()=>Float32Array.from({length:h},()=>randn(s2)));
+    this.b2=new Float32Array(out_);
+    this.mW1=this.W1.map(r=>new Float32Array(r.length));
+    this.vW1=this.W1.map(r=>new Float32Array(r.length));
+    this.mW2=this.W2.map(r=>new Float32Array(r.length));
+    this.vW2=this.W2.map(r=>new Float32Array(r.length));
+    this.mb1=new Float32Array(h); this.vb1=new Float32Array(h);
+    this.mb2=new Float32Array(out_); this.vb2=new Float32Array(out_);
+    this.t=0; this.lr=8e-4; this.b1c=.9; this.b2c=.999;
+  }
+  fwd(x){
+    const h1=new Float32Array(this.W1.length);
+    for(let j=0;j<h1.length;j++){
+      let s=this.b1[j]; for(let k=0;k<x.length;k++)s+=this.W1[j][k]*x[k];
+      h1[j]=Math.max(0,s);
+    }
+    const out=new Float32Array(this.W2.length);
+    for(let j=0;j<out.length;j++){
+      let s=this.b2[j]; for(let k=0;k<h1.length;k++)s+=this.W2[j][k]*h1[k];
+      out[j]=s;
+    }
+    this._x=x; this._h1=h1; return out;
+  }
+  // TD誤差を逆伝播してAdam更新
+  tdBack(act,err){
+    this.t++;
+    const bc1=1-Math.pow(this.b1c,this.t), bc2=1-Math.pow(this.b2c,this.t);
+    const adam=(W,mW,vW,j,k,g)=>{
+      mW[j][k]=this.b1c*mW[j][k]+(1-this.b1c)*g;
+      vW[j][k]=this.b2c*vW[j][k]+(1-this.b2c)*g*g;
+      W[j][k]-=this.lr*(mW[j][k]/bc1)/(Math.sqrt(vW[j][k]/bc2)+1e-8);
+    };
+    const adamB=(b,mb,vb,j,g)=>{
+      mb[j]=this.b1c*mb[j]+(1-this.b1c)*g;
+      vb[j]=this.b2c*vb[j]+(1-this.b2c)*g*g;
+      b[j]-=this.lr*(mb[j]/bc1)/(Math.sqrt(vb[j]/bc2)+1e-8);
+    };
+    // dOut: only act-th element has gradient
+    const dH1=new Float32Array(this._h1.length);
+    for(let k=0;k<dH1.length;k++){
+      const g=err*this.W2[act][k];
+      dH1[k]=this._h1[k]>0?g:0; // ReLUゲート
+      adam(this.W2,this.mW2,this.vW2,act,k,err*this._h1[k]);
+    }
+    adamB(this.b2,this.mb2,this.vb2,act,err);
+    for(let j=0;j<this.W1.length;j++){
+      if(Math.abs(dH1[j])<1e-9)continue;
+      for(let k=0;k<this._x.length;k++) adam(this.W1,this.mW1,this.vW1,j,k,dH1[j]*this._x[k]);
+      adamB(this.b1,this.mb1,this.vb1,j,dH1[j]);
+    }
+  }
+  copyFrom(src){
+    for(let j=0;j<this.W1.length;j++) this.W1[j].set(src.W1[j]);
+    this.b1.set(src.b1);
+    for(let j=0;j<this.W2.length;j++) this.W2[j].set(src.W2[j]);
+    this.b2.set(src.b2);
+  }
+}
+
+class DQNAgent {
+  constructor(){
+    this.net=new MLP(10,48,N_ACT); this.target=new MLP(10,48,N_ACT);
+    this.target.copyFrom(this.net);
+    this.buf=[]; this.bufMax=6000; this.bsz=32;
+    this.eps=1.0; this.epsDecay=0.994; this.epsMin=0.04;
+    this.gamma=0.95; this.step=0; this.targetFreq=300;
+    this.episode=0; this.epR=0; this.rewardHist=[];
+    this.catchCount=0; this.trialCount=0;
+  }
+  act(sv){
+    if(Math.random()<this.eps) return Math.floor(Math.random()*N_ACT);
+    const q=this.net.fwd(sv); let b=0;
+    for(let a=1;a<N_ACT;a++) if(q[a]>q[b])b=a;
+    return b;
+  }
+  store(s,a,r,s2,done){ this.buf.push({s,a,r,s2,done}); if(this.buf.length>this.bufMax)this.buf.shift(); }
+  train(){
+    if(this.buf.length<this.bsz) return;
+    this.step++;
+    for(let i=0;i<this.bsz;i++){
+      const {s,a,r,s2,done}=this.buf[Math.floor(Math.random()*this.buf.length)];
+      const tq=this.target.fwd(s2);
+      const maxTQ=done?0:Math.max(...tq);
+      const tdTarget=r+this.gamma*maxTQ;
+      const cq=this.net.fwd(s);
+      this.net.tdBack(a, cq[a]-tdTarget);
+    }
+    if(this.step%this.targetFreq===0) this.target.copyFrom(this.net);
+    this.epR += 0; // epRはstoreで追跡
+  }
+  endEp(result,r){
+    this.rewardHist.push(r); if(this.rewardHist.length>200)this.rewardHist.shift();
+    if(result==='catch') this.catchCount++;
+    this.trialCount++;
+    this.eps=Math.max(this.epsMin,this.eps*this.epsDecay);
+    this.episode++;
+  }
+  stateCount(){ return this.buf.length+' trans'; }
+  catchRate(){ return this.trialCount>0?this.catchCount/this.trialCount:0; }
+}
+
+// ════════════════════════════════════════════════
+// 後の先 指標トラッカー
+// ════════════════════════════════════════════════
+const gonosen = {
+  events: [],           // 直近30捕獲イベント
+  speedBuf: [],         // {speed, epTime} 直近の速度履歴
+  preyAngleBuf: [],     // {angle, epTime} 獲物の方向角履歴
+  m1:0, m2:0, m3:0, m4:0,  // 指標値 (0-1)
+
+  pushSpeed(spd, t){
+    this.speedBuf.push({spd,t});
+    if(this.speedBuf.length>600) this.speedBuf.shift();
+  },
+  pushPreyAngle(ang, t){
+    this.preyAngleBuf.push({ang,t});
+    if(this.preyAngleBuf.length>600) this.preyAngleBuf.shift();
+  },
+
+  onCatch(pred, prey, epTime){
+    const WIN=1.5;
+    // 指標① 待機率: 捕獲前1.5sの低速割合
+    const recentSpd=this.speedBuf.filter(s=>s.t>epTime-WIN&&s.t<=epTime);
+    const waitRate=recentSpd.length>0?recentSpd.filter(s=>s.spd<8).length/recentSpd.length:0;
+
+    // 指標② 角度遮断率: predの接近方向がpreyの正面か
+    const predDir=pred.vel.clone().normalize();
+    const preyDir=prey.vel.clone().normalize();
+    const dot=predDir.dot(preyDir);
+    const interception=dot<-0.42; // 60°以上前方から
+
+    // 指標③ 転換直後捕獲率: 獲物が1.2s以内に大きく方向転換したか
+    const WIN2=1.2;
+    const oldAngle=this.preyAngleBuf.find(p=>p.t<=epTime-WIN2+.15&&p.t>=epTime-WIN2-.15);
+    const currAngle=Math.atan2(prey.vel.z,prey.vel.x);
+    const postTurn=oldAngle?Math.abs(angDiff(oldAngle.ang,currAngle))>Math.PI/4:false;
+
+    // 指標④ エネルギー効率
+    const effic=pred.energy;
+
+    this.events.push({waitRate,interception,postTurn,effic});
+    if(this.events.length>30) this.events.shift();
+    this._recalc();
+  },
+  _recalc(){
+    if(this.events.length===0) return;
+    const n=this.events.length;
+    this.m1=this.events.reduce((s,e)=>s+e.waitRate,0)/n;
+    this.m2=this.events.filter(e=>e.interception).length/n;
+    this.m3=this.events.filter(e=>e.postTurn).length/n;
+    this.m4=this.events.reduce((s,e)=>s+e.effic,0)/n;
+  },
+  reset(){
+    this.speedBuf=[]; this.preyAngleBuf=[];
+  }
+};
+
+// ════════════════════════════════════════════════
+// シミュレーション エンティティ
+// ════════════════════════════════════════════════
+function rndPos(minD, other){
+  let p;
+  do { p=new THREE.Vector3((Math.random()-.5)*(WORLD*1.6),0,(Math.random()-.5)*(WORLD*1.6)); }
+  while(other&&p.distanceTo(other)<minD);
+  return p;
+}
+
+let pred=null, prey=null, agentQ=null, agentD=null;
+let agentMode='Q'; // 'Q' or 'D'
+let epTime=0, prevDist=0;
+let paused=false, testMode=false, speedMult=8;
+let currentAction=0, prevStateQ='', prevStateD=null, stepEpR=0;
+
+function getAgent(){ return agentMode==='Q'?agentQ:agentD; }
+function encodeState(){ return agentMode==='Q'?encodeStateQ(pred,prey):encodeStateD(pred,prey); }
+
+function buildEntities(){
+  // 後片付け
+  if(pred){ scene.remove(pred.group); scene.remove(pred.trail.line); scene.remove(pred.ring); scene.remove(pred.arrow); }
+  if(prey){ scene.remove(prey.group); scene.remove(prey.trail.line); scene.remove(prey.ring); scene.remove(prey.arrow); }
+
+  const pPos=rndPos(0,null);
+  const qPos=rndPos(65,pPos);
+
+  const pm=makePredMesh();
+  pred={
+    pos:pPos.clone(), vel:new THREE.Vector3(1,0,0), acc:new THREE.Vector3(),
+    energy:1.0, group:pm.group, head:pm.head,
+    trail:makeTrail(0xcc3322), ring:makeRing(P_MASS*35,0xff4422), arrow:makeArrow(0xff9900),
+    wRef:{},
+  };
+  pred.group.position.copy(pred.pos); scene.add(pred.group);
+
+  const qm=makePreyMesh();
+  prey={
+    pos:qPos.clone(), vel:new THREE.Vector3(-1,0,0), acc:new THREE.Vector3(),
+    stamina:1.0, state:'GRAZE', stateT:0,
+    zigT:0, zigA:0, recentlyTurned:false,
+    velAngle:0, prevVelAngle:0, velAngleChangeAcc:0,
+    group:qm.group, head:qm.head,
+    trail:makeTrail(0x22aa66), ring:makeRing(Q_CFG.detR,0x44dd88), arrow:makeArrow(0x44ffaa),
+    wRef:{},
+  };
+  prey.group.position.copy(prey.pos); scene.add(prey.group);
+
+  epTime=0; prevDist=pred.pos.distanceTo(prey.pos); stepEpR=0;
+  gonosen.reset();
+  prevStateQ=''; prevStateD=null;
+}
+
+// ════════════════════════════════════════════════
+// インパラ ヒューリスティック更新
+// ════════════════════════════════════════════════
+const PREY_HEAD_COLS={GRAZE:0x44ff88,ALERT:0xffff44,FLEE:0xff8833,RECOVER:0x44aaff};
+const PREY_BADGE_BG={GRAZE:'#226644',ALERT:'#997700',FLEE:'#883300',RECOVER:'#224488'};
+
+function tickPrey(dt){
+  const cfg=Q_CFG;
+  const dist=prey.pos.distanceTo(pred.pos);
+  const predSpd=pred.vel.length();
+  const dynDet=cfg.detR*(0.65+0.35*(predSpd/26));
+
+  // ジグザグタイマー
+  prey.zigT-=dt;
+  if(prey.zigT<=0){
+    const [mn,mx]=cfg.zigInt;
+    prey.zigT=mn+Math.random()*(mx-mn);
+    prey.zigA=(Math.random()-.5)*cfg.zigAng;
+  }
+
+  // 方向転換検出 (後の先指標③に使用)
+  const curAng=Math.atan2(prey.vel.z,prey.vel.x);
+  const dAng=Math.abs(angDiff(prey.prevVelAngle, curAng));
+  prey.velAngleChangeAcc=prey.velAngleChangeAcc*.85+dAng;
+  prey.recentlyTurned=prey.velAngleChangeAcc>0.3;
+  prey.prevVelAngle=curAng;
+
+  let maxSpd=cfg.walkSpd, ap=new THREE.Vector3();
+  switch(prey.state){
+    case'GRAZE':
+      ap.add(steerWander(prey.vel,prey.wRef,cfg.maxF*.24));
+      ap.add(steerBnd(prey.pos,cfg.maxF));
+      prey.stamina=Math.min(1,prey.stamina+cfg.sRecover*dt);
+      if(dist<dynDet){ prey.state='ALERT'; prey.stateT=0; }
+      maxSpd=cfg.walkSpd; break;
+
+    case'ALERT':
+      ap.add(steerFlee(prey.pos,prey.vel,pred.pos,cfg.walkSpd*.7,cfg.maxF*.7));
+      ap.add(steerBnd(prey.pos,cfg.maxF));
+      prey.stamina=Math.min(1,prey.stamina+cfg.sRecover*dt*.6);
+      if(dist<cfg.panicR||predSpd>11*1.5){ prey.state='FLEE'; prey.stateT=0; }
+      else if(dist>dynDet*1.4){ prey.state='GRAZE'; prey.stateT=0; }
+      maxSpd=cfg.walkSpd*.8; break;
+
+    case'FLEE':{
+      const fs=cfg.fleeSpd*Math.max(.38,prey.stamina);
+      let f=steerEvasion(prey.pos,prey.vel,pred.pos,pred.vel,fs,cfg.maxF);
+      f=rotY(f,prey.zigA);
+      ap.add(f); ap.add(steerBnd(prey.pos,cfg.maxF));
+      prey.stamina-=cfg.sDrain*dt;
+      if(dist>cfg.safeR*1.4){ prey.state='RECOVER'; prey.stateT=0; }
+      maxSpd=cfg.fleeSpd*Math.max(.28,prey.stamina); break;
+    }
+    case'RECOVER':
+      ap.add(steerWander(prey.vel,prey.wRef,cfg.maxF*.18));
+      ap.add(steerBnd(prey.pos,cfg.maxF));
+      prey.stamina=Math.min(1,prey.stamina+cfg.sRecover*dt);
+      if(dist<cfg.panicR){ prey.state='FLEE'; prey.stateT=0; }
+      else if(dist<dynDet){ prey.state='ALERT'; prey.stateT=0; }
+      maxSpd=cfg.walkSpd*.65; break;
+  }
+  prey.stateT+=dt;
+
+  prey.acc.add(ap.divideScalar(cfg.mass));
+  prey.vel.add(prey.acc.clone().multiplyScalar(dt));
+  prey.vel.y=0; prey.vel.clampLength(0,maxSpd);
+  prey.pos.add(prey.vel.clone().multiplyScalar(dt));
+  prey.pos.y=0;
+  prey.pos.x=Math.max(-WORLD,Math.min(WORLD,prey.pos.x));
+  prey.pos.z=Math.max(-WORLD,Math.min(WORLD,prey.pos.z));
+  prey.acc.set(0,0,0);
+  prey.group.position.copy(prey.pos);
+  if(prey.vel.length()>.2) prey.group.lookAt(prey.pos.clone().add(prey.vel));
+  prey.head.material.color.setHex(PREY_HEAD_COLS[prey.state]||0x44ff88);
+  pushTrail(prey.trail,prey.pos);
+  prey.ring.position.set(prey.pos.x,.12,prey.pos.z);
+  gonosen.pushPreyAngle(Math.atan2(prey.vel.z,prey.vel.x), epTime);
+}
+
+// ════════════════════════════════════════════════
+// RL捕食者 アクション実行
+// ════════════════════════════════════════════════
+function execAction(actIdx){
+  const a=ACTIONS[actIdx];
+  if(a.spd<0){
+    // 待機: ブレーキ
+    pred.acc.add(pred.vel.clone().negate().multiplyScalar(8/P_MASS));
+    pred.energy=Math.min(1,pred.energy+E_WAIT*SIM_DT);
+  } else {
+    const spd=SPEEDS[a.spd];
+    const dir=new THREE.Vector3(Math.sin(a.dir),0,Math.cos(a.dir));
+    const steer=dir.multiplyScalar(spd).sub(pred.vel).clampLength(0,P_MAXF);
+    pred.acc.add(steer.divideScalar(P_MASS));
+    pred.energy=Math.max(0,pred.energy+E_DELTA[a.spd]*SIM_DT);
+    gonosen.pushSpeed(spd, epTime);
+  }
+}
+
+function integratePred(dt){
+  pred.vel.add(pred.acc.clone().multiplyScalar(dt));
+  pred.vel.y=0; pred.vel.clampLength(0,SPEEDS[2]);
+  pred.pos.add(pred.vel.clone().multiplyScalar(dt));
+  pred.pos.y=0;
+  pred.pos.x=Math.max(-WORLD,Math.min(WORLD,pred.pos.x));
+  pred.pos.z=Math.max(-WORLD,Math.min(WORLD,pred.pos.z));
+  pred.acc.set(0,0,0);
+  pred.group.position.copy(pred.pos);
+  if(pred.vel.length()>.2) pred.group.lookAt(pred.pos.clone().add(pred.vel));
+  pushTrail(pred.trail,pred.pos);
+  pred.ring.position.set(pred.pos.x,.12,pred.pos.z);
+  gonosen.pushSpeed(pred.vel.length(),epTime);
+}
+
+// ════════════════════════════════════════════════
+// シミュレーション 1ステップ
+// ════════════════════════════════════════════════
+function simStep(){
+  const dt=SIM_DT;
+  epTime+=dt;
+
+  // インパラ更新
+  tickPrey(dt);
+
+  // 境界力も predに
+  pred.acc.add(steerBnd(pred.pos,P_MAXF));
+
+  // 状態取得・アクション選択
+  const state=encodeState();
+  let action;
+  if(testMode){
+    action=agentMode==='Q'?agentQ.best(state):agentD.act(state);
+  } else {
+    action=getAgent().act(state);
+  }
+  currentAction=action;
+
+  // アクション実行
+  execAction(action);
+  integratePred(dt);
+
+  const dist=pred.pos.distanceTo(prey.pos);
+
+  // 報酬計算 (ポテンシャルシェーピング付き)
+  let r=-dt*.4;
+  r+=0.7*(prevDist-dist); // 接近報酬
+  // スプリント余分コスト
+  if(ACTIONS[action].spd===2) r-=0.03;
+
+  // 終了判定
+  let done=false, result='timeout';
+  if(dist<CATCH_D){
+    r+=200; done=true; result='catch';
+    gonosen.onCatch(pred,prey,epTime);
+    // 獲物リスポーン
+    const np=rndPos(55,pred.pos);
+    prey.pos.copy(np);
+    prey.vel.set((Math.random()-.5)*2,0,(Math.random()-.5)*2).normalize().multiplyScalar(2);
+    prey.stamina=1.0; prey.state='GRAZE'; prey.trail.pts=[];
+    pred.energy=Math.min(1,pred.energy+.22); // 食事でエネルギー回復
+  } else if(pred.energy<=0){
+    r-=100; done=true; result='exhausted';
+  } else if(epTime>=EP_MAX){
+    r-=20; done=true;
+  }
+
+  stepEpR+=r;
+
+  // Q学習更新
+  if(agentMode==='Q'){
+    const ns=encodeState();
+    agentQ.update(state,action,r,ns,done);
+  } else {
+    const ns=encodeStateD(pred,prey);
+    agentD.store(state,action,r,ns,done);
+    if(agentD.step%4===0) agentD.train();
+    agentD.epR=(agentD.epR||0)+r;
+  }
+
+  if(done){
+    if(agentMode==='Q') agentQ.endEp(result);
+    else agentD.endEp(result,stepEpR);
+    stepEpR=0;
+    buildEntities();
+  } else {
+    prevDist=dist;
+  }
+}
+
+// ════════════════════════════════════════════════
+// グラフ描画
+// ════════════════════════════════════════════════
+function drawLineGraph(canvasId, data, col, label, yMin, yMax){
+  const cv=document.getElementById(canvasId);
+  const ctx=cv.getContext('2d');
+  const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.fillRect(0,0,W,H);
+  if(data.length<2) return;
+  const mn=yMin!=null?yMin:Math.min(...data);
+  const mx=yMax!=null?yMax:Math.max(...data);
+  const rng=mx-mn||1;
+  ctx.strokeStyle=col; ctx.lineWidth=1.4;
+  ctx.beginPath();
+  for(let i=0;i<data.length;i++){
+    const x=(i/(data.length-1))*W;
+    const y=H-(data[i]-mn)/rng*(H-4)-2;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  // 移動平均
+  if(data.length>10){
+    const win=Math.min(20,Math.floor(data.length/5));
+    ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let i=win;i<data.length;i++){
+      const avg=data.slice(i-win,i).reduce((a,b)=>a+b,0)/win;
+      const x=(i/(data.length-1))*W;
+      const y=H-(avg-mn)/rng*(H-4)-2;
+      i===win?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle='rgba(150,180,255,0.5)'; ctx.font='9px Courier New';
+  ctx.fillText(label,3,10);
+}
+
+// 捕獲率の履歴
+const crHist=[];
+
+// ════════════════════════════════════════════════
+// UI 更新
+// ════════════════════════════════════════════════
+const BADGE_COL={GRAZE:'#226644',ALERT:'#997700',FLEE:'#883300',RECOVER:'#224488'};
+function updateUI(){
+  const ag=getAgent();
+  // インパラ
+  const qs=Math.round(prey.stamina*100);
+  document.getElementById('q-epct').textContent=qs;
+  document.getElementById('q-ebar').style.width=qs+'%';
+  document.getElementById('q-ebar').style.background=qs>50?'#44dd88':qs>20?'#aadd44':'#446655';
+  const qb=document.getElementById('q-badge');
+  qb.textContent=prey.state; qb.style.background=BADGE_COL[prey.state]||'#444';
+  qb.style.color=prey.state==='ALERT'?'#222':'#fff';
+
+  // チーター
+  const pe=Math.round(pred.energy*100);
+  document.getElementById('p-epct').textContent=pe;
+  document.getElementById('p-ebar').style.width=pe+'%';
+  document.getElementById('p-ebar').style.background=pe>50?'#ff6644':pe>20?'#ffaa00':'#446677';
+  const pb=document.getElementById('p-badge');
+  const act=ACTIONS[currentAction];
+  pb.textContent=act.spd<0?'WAIT':`DIR${Math.round(act.dir*180/Math.PI)}°/SPD${act.spd}`;
+  pb.style.background=act.spd===2?'#882200':act.spd===1?'#775500':act.spd<0?'#334455':'#225533';
+
+  // 距離
+  document.getElementById('dist-v').textContent=pred.pos.distanceTo(prey.pos).toFixed(1)+' m';
+
+  // RL stats
+  document.getElementById('rl-ep').textContent=ag.episode;
+  document.getElementById('rl-eps').textContent=ag.eps.toFixed(3);
+  const cr=ag.catchRate();
+  document.getElementById('rl-cr').textContent=`${ag.catchCount}/${ag.trialCount}`;
+  document.getElementById('rl-rw').textContent=
+    ag.rewardHist.length?ag.rewardHist[ag.rewardHist.length-1].toFixed(1):'—';
+  document.getElementById('rl-qs').textContent=ag.stateCount();
+  document.getElementById('rl-et').textContent=epTime.toFixed(1)+' s';
+
+  // 後の先指標
+  const setBar=(id,v)=>{
+    const pct=Math.round(v*100);
+    document.getElementById(id+'v').textContent=pct+'%';
+    document.getElementById(id+'b').style.width=pct+'%';
+  };
+  setBar('m1',gonosen.m1); setBar('m2',gonosen.m2);
+  setBar('m3',gonosen.m3); setBar('m4',gonosen.m4);
+
+  // グラフ
+  drawLineGraph('rw-graph',ag.rewardHist,'#7af','エピソード報酬',null,null);
+  crHist.push(cr); if(crHist.length>200)crHist.shift();
+  drawLineGraph('cr-graph',crHist,'#4fa','捕獲率',0,1);
+}
+
+// ════════════════════════════════════════════════
+// メインループ
+// ════════════════════════════════════════════════
+let lastT=null;
+function animate(ts){
+  requestAnimationFrame(animate);
+  if(!lastT){lastT=ts;return;}
+  const rawDt=Math.min((ts-lastT)/1000,.1);
+  lastT=ts;
+
+  if(!paused&&pred&&prey){
+    // 高速倍率: 1フレームで複数ステップ
+    const steps=Math.max(1,Math.floor(speedMult*rawDt/SIM_DT));
+    for(let i=0;i<steps;i++){
+      simStep();
+      if(!pred||!prey) break;
+    }
+    updateUI();
+  }
+
+  tickCamera();
+  renderer.render(scene,cam);
+}
+
+// ════════════════════════════════════════════════
+// 初期化・モード管理
+// ════════════════════════════════════════════════
+function init(){
+  agentQ=new QAgent();
+  agentD=new DQNAgent();
+  buildEntities();
+}
+
+function setMode(m){
+  agentMode=m;
+  document.getElementById('tab-q').classList.toggle('on',m==='Q');
+  document.getElementById('tab-d').classList.toggle('on',m==='D');
+  document.getElementById('rl-qs').parentElement.querySelector('span:first-child').textContent=
+    m==='Q'?'Qテーブル状態数':'リプレイバッファ';
+  buildEntities();
+}
+
+function toggleTest(){
+  testMode=!testMode;
+  document.getElementById('btn-test').classList.toggle('active',testMode);
+  document.getElementById('btn-test').textContent=testMode?'🎓 訓練モードに戻す':'🎯 テストモード';
+}
+
+// コントロール
+document.getElementById('btn-rst').addEventListener('click',()=>{ init(); crHist.length=0; });
+document.getElementById('btn-pause').addEventListener('click',function(){
+  paused=!paused; this.textContent=paused?'▶ 再開':'⏸ 停止';
+});
+document.getElementById('btn-cam').addEventListener('click',()=>{
+  camMode=(camMode+1)%4;
+  document.getElementById('camlab').textContent=CAM_NAMES[camMode];
+});
+document.getElementById('spd').addEventListener('input',function(){
+  speedMult=parseInt(this.value);
+  document.getElementById('spd-lbl').textContent=speedMult+' ×（訓練高速化）';
+});
+
+window.addEventListener('resize',()=>{
+  cam.aspect=innerWidth/innerHeight;
+  cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// 起動
+init();
+animate(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>捕食者-被食者 3D シミュレーション | Stage 1: ヒューリスティックAI</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a14; font-family:'Courier New',monospace; overflow:hidden; }
+#c { position:fixed; top:0; left:0; width:100vw; height:100vh; }
+
+/* ── 左パネル ── */
+#panel {
+  position:fixed; top:10px; left:10px; width:230px;
+  background:rgba(8,8,18,0.88);
+  border:1px solid rgba(120,160,255,0.2);
+  border-radius:8px; padding:11px; font-size:12px; color:#ccc;
+  backdrop-filter:blur(6px); z-index:100;
+  display:flex; flex-direction:column; gap:10px;
+}
+.sec { border-bottom:1px solid rgba(255,255,255,0.07); padding-bottom:8px; }
+.sec:last-child { border-bottom:none; padding-bottom:0; }
+.stitle { font-size:10px; color:#7af; text-transform:uppercase; letter-spacing:1.2px; margin-bottom:6px; }
+
+.arow { display:flex; align-items:center; gap:7px; margin-bottom:7px; }
+.arow:last-child { margin-bottom:0; }
+.dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.ainfo { flex:1; }
+.ahead { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
+.sbadge {
+  font-size:9px; padding:1px 5px; border-radius:3px;
+  font-weight:bold; color:#fff; background:#444;
+}
+.ebar-bg { height:5px; background:rgba(255,255,255,0.12); border-radius:3px; overflow:hidden; }
+.ebar { height:100%; border-radius:3px; transition:width .15s, background .3s; }
+.esub { font-size:9px; color:#666; margin-top:2px; }
+
+.statrow { display:flex; justify-content:space-between; margin-bottom:3px; font-size:11px; }
+.statv { color:#adf; }
+
+#mini { width:100%; height:58px; border-radius:4px; display:block; }
+
+#speed-lbl { text-align:center; font-size:11px; color:#adf; margin-top:2px; }
+input[type=range] { width:100%; accent-color:#7af; }
+
+.chkrow { font-size:11px; cursor:pointer; display:flex; align-items:center; gap:5px; margin-bottom:3px; }
+input[type=checkbox] { accent-color:#7af; }
+
+.btns { display:flex; gap:5px; flex-wrap:wrap; }
+button {
+  background:rgba(80,120,255,0.18);
+  border:1px solid rgba(80,120,255,0.35);
+  color:#aad; padding:4px 7px; border-radius:4px;
+  cursor:pointer; font-size:11px; font-family:inherit;
+}
+button:hover { background:rgba(80,120,255,0.38); }
+
+/* ── 凡例 ── */
+#legend {
+  position:fixed; bottom:10px; left:10px;
+  font-size:10px; color:rgba(180,200,255,0.55); z-index:100;
+}
+#cam-mode {
+  position:fixed; bottom:10px; right:10px;
+  font-size:11px; color:rgba(180,200,255,0.6);
+  background:rgba(0,0,0,0.5); padding:4px 8px; border-radius:4px; z-index:100;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="panel">
+  <!-- タイトル -->
+  <div class="sec">
+    <div class="stitle">🐆 捕食者-被食者 3D Sim</div>
+    <div style="font-size:9px;color:#555">Stage 1 / 3 &nbsp;—&nbsp; Reynolds Steering + State Machine</div>
+  </div>
+
+  <!-- 動物状態 -->
+  <div class="sec">
+    <div class="stitle">動物状態</div>
+    <div class="arow">
+      <div class="dot" style="background:#ff6644"></div>
+      <div class="ainfo">
+        <div class="ahead">
+          <span>チーター</span>
+          <span class="sbadge" id="p-badge">PATROL</span>
+        </div>
+        <div class="ebar-bg"><div class="ebar" id="p-ebar" style="width:100%;background:#ff6644"></div></div>
+        <div class="esub">エネルギー: <span id="p-epct">100</span>%</div>
+      </div>
+    </div>
+    <div class="arow">
+      <div class="dot" style="background:#44dd88"></div>
+      <div class="ainfo">
+        <div class="ahead">
+          <span>インパラ</span>
+          <span class="sbadge" id="q-badge">GRAZE</span>
+        </div>
+        <div class="ebar-bg"><div class="ebar" id="q-ebar" style="width:100%;background:#44dd88"></div></div>
+        <div class="esub">スタミナ: <span id="q-epct">100</span>%</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-top:3px">
+      距離: <span id="dist-val" style="color:#adf">-- m</span>
+    </div>
+  </div>
+
+  <!-- 統計 -->
+  <div class="sec">
+    <div class="stitle">統計</div>
+    <div class="statrow"><span>追跡開始</span><span class="statv" id="s-chases">0</span></div>
+    <div class="statrow"><span>捕獲</span><span class="statv" id="s-catches">0</span></div>
+    <div class="statrow"><span>捕獲率</span><span class="statv" id="s-rate">—</span></div>
+    <div class="statrow"><span>平均追跡時間</span><span class="statv" id="s-avgch">—</span></div>
+    <div class="statrow"><span>シミュ経過時間</span><span class="statv" id="s-time">0 s</span></div>
+    <canvas id="mini" width="208" height="58"></canvas>
+  </div>
+
+  <!-- 速度 -->
+  <div class="sec">
+    <div class="stitle">速度倍率</div>
+    <input type="range" id="spd" min="0.25" max="8" step="0.25" value="1">
+    <div id="speed-lbl">1.0 ×</div>
+  </div>
+
+  <!-- 表示 -->
+  <div class="sec">
+    <div class="stitle">表示オプション</div>
+    <label class="chkrow"><input type="checkbox" id="ck-trail" checked> 軌跡</label>
+    <label class="chkrow"><input type="checkbox" id="ck-range"> 検知範囲</label>
+    <label class="chkrow"><input type="checkbox" id="ck-vec"> 速度ベクトル</label>
+    <label class="chkrow"><input type="checkbox" id="ck-tree" checked> 樹木</label>
+  </div>
+
+  <!-- ボタン -->
+  <div class="btns">
+    <button id="btn-reset">リセット</button>
+    <button id="btn-pause">一時停止</button>
+    <button id="btn-cam">カメラ ▶</button>
+  </div>
+</div>
+
+<div id="legend">
+  マウスドラッグ: 回転 &nbsp;|&nbsp; ホイール: ズーム &nbsp;|&nbsp; カメラボタン: 追跡切替
+</div>
+<div id="cam-mode">📷 フリーカメラ</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════════
+// パラメータ設定
+// ════════════════════════════════════════════════════
+const WORLD = 130;
+const CATCH_D = 3.2;
+
+const P_CFG = {                   // チーター (Predator)
+  walkSpeed: 4, stalkSpeed: 9, sprintSpeed: 28,
+  maxForce: 55, mass: 1.2,
+  sightRange: 85, stalkRange: 45,
+  giveUpRange: 110,
+  energyDrain: 1/9, energyRecover: 1/22,
+  color: 0xff6644, trailCol: 0xcc3322,
+};
+const Q_CFG = {                   // インパラ (Prey)
+  walkSpeed: 3, fleeSpeed: 22,
+  maxForce: 65, mass: 0.85,
+  detectRange: 58, panicRange: 28, safeRange: 85,
+  staminaDrain: 1/14, staminaRecover: 1/9,
+  zigInterval: [0.35, 1.1], zigAngle: Math.PI * 0.65,
+  color: 0x44dd88, trailCol: 0x22aa66,
+};
+
+// ════════════════════════════════════════════════════
+// Three.js 基盤
+// ════════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.FogExp2(0xb0d8f0, 0.006);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.2, 800);
+camera.position.set(0, 90, 140);
+camera.lookAt(0, 0, 0);
+
+// ライト
+scene.add(new THREE.AmbientLight(0xfff8e0, 0.55));
+const sun = new THREE.DirectionalLight(0xfffbe8, 1.3);
+sun.position.set(60, 120, 40);
+sun.castShadow = true;
+sun.shadow.mapSize.setScalar(2048);
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 600;
+['left','right','top','bottom'].forEach((k,i) => {
+  sun.shadow.camera[k] = [-220,220,220,-220][i];
+});
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xb0d0ff, 0x886644, 0.4));
+
+// ════════════════════════════════════════════════════
+// 地形
+// ════════════════════════════════════════════════════
+const gndGeo = new THREE.PlaneGeometry(WORLD*2.2, WORLD*2.2, 60, 60);
+const gndPos = gndGeo.attributes.position;
+for (let i = 0; i < gndPos.count; i++) {
+  const x = gndPos.getX(i), z = gndPos.getY(i);
+  const h = Math.sin(x*0.025)*Math.cos(z*0.028)*2.8
+          + Math.sin(x*0.06+1.2)*Math.sin(z*0.055+0.8)*1.4
+          + Math.cos(x*0.01+z*0.012)*1.0;
+  gndPos.setZ(i, h);
+}
+gndGeo.computeVertexNormals();
+const gnd = new THREE.Mesh(gndGeo,
+  new THREE.MeshLambertMaterial({ color: 0x9a8060 }));
+gnd.rotation.x = -Math.PI/2;
+gnd.receiveShadow = true;
+scene.add(gnd);
+
+// グリッド（薄め）
+const grid = new THREE.GridHelper(WORLD*2, 24, 0x443322, 0x332211);
+grid.position.y = 0.08;
+grid.material.opacity = 0.25; grid.material.transparent = true;
+scene.add(grid);
+
+// 境界線
+{
+  const eg = new THREE.EdgesGeometry(new THREE.BoxGeometry(WORLD*2, 0.1, WORLD*2));
+  const em = new THREE.LineBasicMaterial({ color:0x665544, opacity:0.4, transparent:true });
+  const el = new THREE.LineSegments(eg, em);
+  el.position.y = 0.15;
+  scene.add(el);
+}
+
+// 樹木グループ
+const treeGroup = new THREE.Group();
+scene.add(treeGroup);
+function buildTrees() {
+  while (treeGroup.children.length) treeGroup.remove(treeGroup.children[0]);
+  const trunkM = new THREE.MeshLambertMaterial({ color:0x6b4226 });
+  const leafM  = new THREE.MeshLambertMaterial({ color:0x3a6b3a });
+  const leafM2 = new THREE.MeshLambertMaterial({ color:0x4a8b50 });
+  for (let i = 0; i < 22; i++) {
+    const x = (Math.random()-0.5)*(WORLD*1.9);
+    const z = (Math.random()-0.5)*(WORLD*1.9);
+    const h = 5 + Math.random()*9;
+    const g = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.5,h,7), trunkM);
+    trunk.position.y = h/2; trunk.castShadow = true;
+    g.add(trunk);
+    const lh = 5 + Math.random()*5;
+    const leaf = new THREE.Mesh(new THREE.ConeGeometry(3.5+Math.random()*2, lh, 8),
+      Math.random()>0.5?leafM:leafM2);
+    leaf.position.y = h + lh/2 - 1; leaf.castShadow = true;
+    g.add(leaf);
+    g.position.set(x, 0, z);
+    treeGroup.add(g);
+  }
+}
+buildTrees();
+
+// ════════════════════════════════════════════════════
+// カメラ制御
+// ════════════════════════════════════════════════════
+let camTheta = 0.3, camPhi = 0.72, camR = 160;
+const camTarget = new THREE.Vector3();
+const camPos    = new THREE.Vector3(0, 90, 140);
+let camMode = 0; // 0=free, 1=pred, 2=prey, 3=top
+const CAM_LABELS = ['📷 フリーカメラ','🔴 チーター追跡','🟢 インパラ追跡','🦅 俯瞰'];
+
+let dragging = false, lastMX = 0, lastMY = 0;
+canvas.addEventListener('pointerdown', e => { dragging=true; lastMX=e.clientX; lastMY=e.clientY; });
+canvas.addEventListener('pointerup',   () => dragging = false);
+canvas.addEventListener('pointermove', e => {
+  if (!dragging || camMode !== 0) return;
+  camTheta -= (e.clientX - lastMX) * 0.004;
+  camPhi = Math.max(0.08, Math.min(1.45, camPhi + (e.clientY - lastMY)*0.004));
+  lastMX = e.clientX; lastMY = e.clientY;
+});
+canvas.addEventListener('wheel', e => { camR = Math.max(18, Math.min(350, camR + e.deltaY*0.12)); });
+
+function tickCamera() {
+  let tgt, pos;
+  if (camMode === 0) {
+    tgt = new THREE.Vector3(0,0,0);
+    pos = new THREE.Vector3(
+      camR * Math.sin(camTheta) * Math.cos(camPhi),
+      camR * Math.sin(camPhi),
+      camR * Math.cos(camTheta) * Math.cos(camPhi)
+    );
+  } else if (camMode === 1 && pred) {
+    tgt = pred.pos.clone();
+    const bk = pred.vel.length()>0.5
+      ? pred.vel.clone().normalize().multiplyScalar(-35)
+      : new THREE.Vector3(0,0,35);
+    pos = pred.pos.clone().add(bk).add(new THREE.Vector3(0,22,0));
+  } else if (camMode === 2 && prey) {
+    tgt = prey.pos.clone();
+    const bk = prey.vel.length()>0.5
+      ? prey.vel.clone().normalize().multiplyScalar(-28)
+      : new THREE.Vector3(0,0,28);
+    pos = prey.pos.clone().add(bk).add(new THREE.Vector3(0,18,0));
+  } else {
+    tgt = new THREE.Vector3(0,0,0);
+    pos = new THREE.Vector3(0,220,0);
+  }
+  camPos.lerp(pos, 0.06);
+  camTarget.lerp(tgt, 0.06);
+  camera.position.copy(camPos);
+  camera.lookAt(camTarget);
+}
+
+// ════════════════════════════════════════════════════
+// ステアリング行動ライブラリ
+// ════════════════════════════════════════════════════
+function steerSeek(pos, vel, target, speed, maxF) {
+  const d = target.clone().sub(pos);
+  if (d.lengthSq() < 0.0001) return new THREE.Vector3();
+  d.normalize().multiplyScalar(speed);
+  return d.sub(vel).clampLength(0, maxF);
+}
+function steerFlee(pos, vel, from, speed, maxF) {
+  const d = pos.clone().sub(from);
+  if (d.lengthSq() < 0.0001) return new THREE.Vector3();
+  d.normalize().multiplyScalar(speed);
+  return d.sub(vel).clampLength(0, maxF);
+}
+function steerPursuit(pos, vel, otherPos, otherVel, speed, maxF) {
+  const to = otherPos.clone().sub(pos);
+  const t = Math.min(to.length() / (speed + otherVel.length() + 0.01), 2.2);
+  const future = otherPos.clone().add(otherVel.clone().multiplyScalar(t));
+  return steerSeek(pos, vel, future, speed, maxF);
+}
+function steerEvasion(pos, vel, otherPos, otherVel, speed, maxF) {
+  const to = otherPos.clone().sub(pos);
+  const t = Math.min(to.length() / (speed + otherVel.length() + 0.01), 2.2);
+  const future = otherPos.clone().add(otherVel.clone().multiplyScalar(t));
+  return steerFlee(pos, vel, future, speed, maxF);
+}
+function steerWander(vel, wRef, strength) {
+  wRef.angle = (wRef.angle||0) + (Math.random()-0.5)*1.4;
+  const fwd = vel.length()>0.2 ? vel.clone().normalize().multiplyScalar(2.5)
+    : new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5);
+  const disp = new THREE.Vector3(Math.cos(wRef.angle), 0, Math.sin(wRef.angle));
+  return fwd.add(disp).normalize().multiplyScalar(strength);
+}
+function steerBoundary(pos, cfg) {
+  const margin = 22, limit = WORLD - margin;
+  const f = new THREE.Vector3();
+  if (pos.x < -limit) f.x = 1; else if (pos.x > limit) f.x = -1;
+  if (pos.z < -limit) f.z = 1; else if (pos.z > limit) f.z = -1;
+  const d = Math.max(Math.abs(pos.x)-limit, Math.abs(pos.z)-limit, 0);
+  if (d <= 0) return f;
+  return f.multiplyScalar(cfg.maxForce * Math.min(d/margin, 1) * 2.2);
+}
+function rotVec2D(v, a) {
+  return new THREE.Vector3(
+    v.x*Math.cos(a) - v.z*Math.sin(a),
+    0,
+    v.x*Math.sin(a) + v.z*Math.cos(a)
+  );
+}
+
+// ════════════════════════════════════════════════════
+// メッシュ構築ヘルパー
+// ════════════════════════════════════════════════════
+function makePredatorMesh() {
+  const g = new THREE.Group();
+  const bm = new THREE.MeshLambertMaterial({ color: P_CFG.color });
+  const hm = new THREE.MeshLambertMaterial({ color: 0xff9966 });
+
+  // 胴体
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.75, 2.6), bm);
+  body.position.y = 1.0; body.castShadow = true; g.add(body);
+  // 首
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.42, 0.8, 7), bm);
+  neck.position.set(0, 1.45, -1.1); neck.rotation.x = 0.35; neck.castShadow = true; g.add(neck);
+  // 頭
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.52, 9, 9), hm);
+  head.position.set(0, 1.62, -1.7); head.castShadow = true; g.add(head);
+  // 耳
+  const earG = new THREE.ConeGeometry(0.13, 0.38, 5);
+  const earM = new THREE.MeshLambertMaterial({ color:0xdd5533 });
+  [-0.28, 0.28].forEach(ox => {
+    const e = new THREE.Mesh(earG, earM);
+    e.position.set(ox, 2.0, -1.65); g.add(e);
+  });
+  // 目
+  const eyeG = new THREE.SphereGeometry(0.1, 6, 6);
+  const eyeM = new THREE.MeshBasicMaterial({ color:0xffee00 });
+  [-0.22, 0.22].forEach(ox => {
+    const e = new THREE.Mesh(eyeG, eyeM);
+    e.position.set(ox, 1.75, -2.15); g.add(e);
+  });
+  // 尻尾
+  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.14,2,5),bm);
+  tail.position.set(0,1.1,1.5); tail.rotation.x=-0.5; g.add(tail);
+  // 脚
+  const legG = new THREE.CylinderGeometry(0.11,0.11,0.85,6);
+  const legM = new THREE.MeshLambertMaterial({ color:0xcc5533 });
+  [[-0.38,0,-0.7],[0.38,0,-0.7],[-0.38,0,0.7],[0.38,0,0.7]].forEach(([x,y,z])=>{
+    const l = new THREE.Mesh(legG,legM); l.position.set(x,0.53,z); g.add(l);
+  });
+  return { group:g, head };
+}
+
+function makePreyMesh() {
+  const g = new THREE.Group();
+  const bm = new THREE.MeshLambertMaterial({ color: Q_CFG.color });
+  const hm = new THREE.MeshLambertMaterial({ color: 0x66ffaa });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.7, 1.9), bm);
+  body.position.y = 1.05; body.castShadow = true; g.add(body);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.32,0.9,7), bm);
+  neck.position.set(0,1.6,-0.8); neck.rotation.x=0.5; neck.castShadow=true; g.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42,9,9), hm);
+  head.position.set(0,1.92,-1.35); head.castShadow=true; g.add(head);
+  // 角 (インパラ特有)
+  const hornG = new THREE.CylinderGeometry(0.05,0.07,1.2,5);
+  const hornM = new THREE.MeshLambertMaterial({ color:0xeecc88 });
+  [-0.18, 0.18].forEach((ox,i) => {
+    const h2 = new THREE.Mesh(hornG, hornM);
+    h2.position.set(ox, 2.95, -1.3);
+    h2.rotation.z = i===0?-0.3:0.3;
+    h2.rotation.x = -0.2;
+    g.add(h2);
+  });
+  // 耳
+  const earG = new THREE.ConeGeometry(0.12,0.55,5);
+  const earM = new THREE.MeshLambertMaterial({ color:0x33bb77 });
+  [-0.45, 0.45].forEach(ox=>{
+    const e = new THREE.Mesh(earG,earM); e.position.set(ox,2.1,-1.2); g.add(e);
+  });
+  // 目
+  const eyeG = new THREE.SphereGeometry(0.09,6,6);
+  const eyeM = new THREE.MeshBasicMaterial({ color:0x553311 });
+  [-0.3, 0.3].forEach(ox=>{
+    const e = new THREE.Mesh(eyeG,eyeM); e.position.set(ox,2.0,-1.72); g.add(e);
+  });
+  // 脚
+  const legG = new THREE.CylinderGeometry(0.09,0.09,0.9,6);
+  const legM = new THREE.MeshLambertMaterial({ color:0x33bb77 });
+  [[-0.3,0,-0.55],[0.3,0,-0.55],[-0.3,0,0.55],[0.3,0,0.55]].forEach(([x,y,z])=>{
+    const l=new THREE.Mesh(legG,legM); l.position.set(x,0.55,z); g.add(l);
+  });
+  return { group:g, head };
+}
+
+// ════════════════════════════════════════════════════
+// トレイルライン
+// ════════════════════════════════════════════════════
+const TRAIL_LEN = 160;
+function makeTrail(color) {
+  const geo = new THREE.BufferGeometry();
+  const buf = new Float32Array(TRAIL_LEN * 3);
+  geo.setAttribute('position', new THREE.BufferAttribute(buf, 3));
+  const mat = new THREE.LineBasicMaterial({ color, opacity:0.55, transparent:true });
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  return { geo, line, pts:[] };
+}
+function updateTrail(trail, pos) {
+  trail.pts.push(pos.clone());
+  if (trail.pts.length > TRAIL_LEN) trail.pts.shift();
+  const attr = trail.geo.attributes.position;
+  const n = trail.pts.length;
+  for (let i=0; i<n; i++) {
+    attr.setXYZ(i, trail.pts[i].x, 0.3, trail.pts[i].z);
+  }
+  if (n < TRAIL_LEN) for (let i=n; i<TRAIL_LEN; i++) {
+    attr.setXYZ(i, trail.pts[n-1].x, 0.3, trail.pts[n-1].z);
+  }
+  trail.geo.setDrawRange(0, n);
+  attr.needsUpdate = true;
+}
+
+// ════════════════════════════════════════════════════
+// 検知範囲リング
+// ════════════════════════════════════════════════════
+function makeRing(radius, color) {
+  const geo = new THREE.RingGeometry(radius-0.6, radius, 72);
+  const mat = new THREE.MeshBasicMaterial({ color, side:THREE.DoubleSide, transparent:true, opacity:0.18 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI/2;
+  mesh.position.y = 0.12;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+
+// ════════════════════════════════════════════════════
+// 速度ベクトル矢印
+// ════════════════════════════════════════════════════
+function makeArrow(color) {
+  const arr = new THREE.ArrowHelper(
+    new THREE.Vector3(0,0,-1), new THREE.Vector3(0,2,0), 6, color, 1.2, 0.7
+  );
+  arr.visible = false;
+  scene.add(arr);
+  return arr;
+}
+
+// ════════════════════════════════════════════════════
+// 動物エンティティ
+// ════════════════════════════════════════════════════
+function randomPos(minD, otherPos) {
+  let p;
+  do {
+    p = new THREE.Vector3(
+      (Math.random()-0.5)*(WORLD*1.7),
+      0,
+      (Math.random()-0.5)*(WORLD*1.7)
+    );
+  } while (otherPos && p.distanceTo(otherPos) < minD);
+  return p;
+}
+
+let pred = null, prey = null;
+let simTime = 0, catches = 0, paused = false, speedMult = 1;
+const distHist = [];
+const HIST_MAX = 220;
+
+// ステートバッジ色
+const BADGE_COL = {
+  PATROL:'#666', STALK:'#cc8800', CHASE:'#dd2200', EXHAUSTED:'#225566',
+  GRAZE:'#226644', ALERT:'#cccc00', FLEE:'#cc6600', RECOVER:'#2266aa',
+};
+
+function buildAnimals() {
+  // 後片付け
+  if (pred) { scene.remove(pred.group); scene.remove(pred.trail.line); scene.remove(pred.ring); scene.remove(pred.arrow); }
+  if (prey) { scene.remove(prey.group); scene.remove(prey.trail.line); scene.remove(prey.ring); scene.remove(prey.arrow); }
+
+  const pPos = randomPos(0, null);
+  const qPos = randomPos(70, pPos);
+
+  // チーター
+  const pm = makePredatorMesh();
+  pred = {
+    cfg: P_CFG,
+    pos: pPos.clone(), vel: new THREE.Vector3(2,0,0),
+    acc: new THREE.Vector3(),
+    state:'PATROL', stateT:0, energy:1.0,
+    totalChases:0, chaseDurs:[],
+    chaseStart:0, catches:0,
+    group: pm.group, head: pm.head,
+    trail: makeTrail(P_CFG.trailCol),
+    ring: makeRing(P_CFG.sightRange, 0xff4422),
+    arrow: makeArrow(0xff9900),
+    wRef: {},
+  };
+  pred.group.position.copy(pred.pos);
+  scene.add(pred.group);
+
+  // インパラ
+  const qm = makePreyMesh();
+  prey = {
+    cfg: Q_CFG,
+    pos: qPos.clone(), vel: new THREE.Vector3(-1,0,0),
+    acc: new THREE.Vector3(),
+    state:'GRAZE', stateT:0, stamina:1.0,
+    zigT:0, zigA:0, escapes:0,
+    group: qm.group, head: qm.head,
+    trail: makeTrail(Q_CFG.trailCol),
+    ring: makeRing(Q_CFG.detectRange, 0x44dd88),
+    arrow: makeArrow(0x44ffaa),
+    wRef: {},
+  };
+  prey.group.position.copy(prey.pos);
+  scene.add(prey.group);
+}
+
+function setPredState(s) {
+  if (pred.state === s) return;
+  pred.state = s; pred.stateT = 0;
+  const headCols = { PATROL:0xff9966, STALK:0xffcc00, CHASE:0xff2200, EXHAUSTED:0x336688 };
+  pred.head.material.color.setHex(headCols[s]||0xff9966);
+}
+function setPreyState(s) {
+  if (prey.state === s) return;
+  prey.state = s; prey.stateT = 0;
+  const headCols = { GRAZE:0x66ffaa, ALERT:0xffff44, FLEE:0xff8833, RECOVER:0x44aaff };
+  prey.head.material.color.setHex(headCols[s]||0x66ffaa);
+}
+
+function integrate(ent, dt, maxSpd) {
+  ent.vel.add(ent.acc.clone().multiplyScalar(dt / (ent.cfg.mass||1)));
+  ent.vel.y = 0;
+  ent.vel.clampLength(0, maxSpd);
+  ent.pos.add(ent.vel.clone().multiplyScalar(dt));
+  ent.pos.y = 0;
+  ent.pos.x = Math.max(-WORLD, Math.min(WORLD, ent.pos.x));
+  ent.pos.z = Math.max(-WORLD, Math.min(WORLD, ent.pos.z));
+  ent.acc.set(0,0,0);
+  ent.stateT += dt;
+  ent.group.position.copy(ent.pos);
+  if (ent.vel.lengthSq() > 0.04) {
+    const look = ent.pos.clone().add(ent.vel);
+    look.y = ent.pos.y;
+    ent.group.lookAt(look);
+  }
+}
+
+function applyF(ent, f) { ent.acc.add(f); }
+
+// ════════════════════════════════════════════════════
+// チーター 更新
+// ════════════════════════════════════════════════════
+function tickPredator(dt) {
+  const dist = pred.pos.distanceTo(prey.pos);
+  const cfg = pred.cfg;
+  let maxSpd = cfg.walkSpeed;
+
+  switch(pred.state) {
+    case 'PATROL':
+      applyF(pred, steerWander(pred.vel, pred.wRef, cfg.maxForce*0.28));
+      applyF(pred, steerBoundary(pred.pos, cfg));
+      pred.energy = Math.min(1, pred.energy + cfg.energyRecover * dt);
+      if (pred.energy > 0.45) {
+        if (dist < cfg.stalkRange) {
+          setPredState('CHASE'); pred.totalChases++; pred.chaseStart = simTime;
+        } else if (dist < cfg.sightRange) {
+          setPredState('STALK');
+        }
+      }
+      maxSpd = cfg.walkSpeed;
+      break;
+
+    case 'STALK':
+      // 低速で接近。獲物の速度に合わせてノイズを加え不規則な接近に
+      applyF(pred, steerSeek(pred.pos, pred.vel, prey.pos, cfg.stalkSpeed, cfg.maxForce));
+      applyF(pred, steerBoundary(pred.pos, cfg));
+      pred.energy = Math.min(1, pred.energy + cfg.energyRecover * dt * 0.4);
+      if (dist < cfg.stalkRange && pred.energy > 0.28) {
+        setPredState('CHASE'); pred.totalChases++; pred.chaseStart = simTime;
+      } else if (dist > cfg.sightRange * 1.25) {
+        setPredState('PATROL');
+      }
+      maxSpd = cfg.stalkSpeed;
+      break;
+
+    case 'CHASE':
+      applyF(pred, steerPursuit(pred.pos, pred.vel, prey.pos, prey.vel,
+        cfg.sprintSpeed, cfg.maxForce));
+      applyF(pred, steerBoundary(pred.pos, cfg));
+      pred.energy -= cfg.energyDrain * dt;
+      if (pred.energy <= 0) {
+        pred.energy = 0;
+        setPredState('EXHAUSTED');
+        pred.chaseDurs.push(simTime - pred.chaseStart);
+      } else if (dist > cfg.giveUpRange) {
+        setPredState('PATROL');
+        pred.chaseDurs.push(simTime - pred.chaseStart);
+      }
+      maxSpd = cfg.sprintSpeed * Math.max(0.35, pred.energy);
+      break;
+
+    case 'EXHAUSTED':
+      // 急ブレーキ
+      applyF(pred, pred.vel.clone().negate().multiplyScalar(8));
+      pred.energy += cfg.energyRecover * dt;
+      if (pred.energy >= 0.75) setPredState('PATROL');
+      maxSpd = 1.2;
+      break;
+  }
+  integrate(pred, dt, maxSpd);
+  updateTrail(pred.trail, pred.pos);
+  pred.ring.position.set(pred.pos.x, 0.12, pred.pos.z);
+}
+
+// ════════════════════════════════════════════════════
+// インパラ 更新
+// ════════════════════════════════════════════════════
+function tickPrey(dt) {
+  const dist = prey.pos.distanceTo(pred.pos);
+  const predSpd = pred.vel.length();
+  const cfg = prey.cfg;
+  // 検知距離：捕食者が速く動くほど被食者が早く気づく
+  const dynDetect = cfg.detectRange * (0.65 + 0.35*(predSpd/P_CFG.sprintSpeed));
+  let maxSpd = cfg.walkSpeed;
+
+  // ジグザグタイマー
+  prey.zigT -= dt;
+  if (prey.zigT <= 0) {
+    const [mn,mx] = cfg.zigInterval;
+    prey.zigT = mn + Math.random()*(mx-mn);
+    prey.zigA = (Math.random()-0.5)*cfg.zigAngle;
+  }
+
+  switch(prey.state) {
+    case 'GRAZE':
+      applyF(prey, steerWander(prey.vel, prey.wRef, cfg.maxForce*0.25));
+      applyF(prey, steerBoundary(prey.pos, cfg));
+      prey.stamina = Math.min(1, prey.stamina + cfg.staminaRecover * dt);
+      if (dist < dynDetect) setPreyState('ALERT');
+      maxSpd = cfg.walkSpeed;
+      break;
+
+    case 'ALERT':
+      // ゆっくり離れつつ監視
+      applyF(prey, steerFlee(prey.pos, prey.vel, pred.pos, cfg.walkSpeed*0.75, cfg.maxForce*0.7));
+      applyF(prey, steerBoundary(prey.pos, cfg));
+      prey.stamina = Math.min(1, prey.stamina + cfg.staminaRecover * dt * 0.6);
+      if (dist < cfg.panicRange || predSpd > P_CFG.stalkSpeed*1.6) {
+        setPreyState('FLEE');
+      } else if (dist > dynDetect * 1.4) {
+        setPreyState('GRAZE');
+      }
+      maxSpd = cfg.walkSpeed * 0.8;
+      break;
+
+    case 'FLEE': {
+      const fleeSpd = cfg.fleeSpeed * Math.max(0.38, prey.stamina);
+      let f = steerEvasion(prey.pos, prey.vel, pred.pos, pred.vel, fleeSpd, cfg.maxForce);
+      // ジグザグ（自然界のインパラの急方向転換を再現）
+      f = rotVec2D(f, prey.zigA);
+      applyF(prey, f);
+      applyF(prey, steerBoundary(prey.pos, cfg));
+      prey.stamina -= cfg.staminaDrain * dt;
+      if (dist > cfg.safeRange && (pred.state==='EXHAUSTED'||pred.state==='PATROL')) {
+        setPreyState('RECOVER'); prey.escapes++;
+      } else if (dist > cfg.safeRange * 1.5) {
+        setPreyState('RECOVER'); prey.escapes++;
+      }
+      maxSpd = cfg.fleeSpeed * Math.max(0.28, prey.stamina);
+      break;
+    }
+    case 'RECOVER':
+      applyF(prey, steerWander(prey.vel, prey.wRef, cfg.maxForce*0.2));
+      applyF(prey, steerBoundary(prey.pos, cfg));
+      prey.stamina = Math.min(1, prey.stamina + cfg.staminaRecover * dt);
+      if (dist < cfg.panicRange) setPreyState('FLEE');
+      else if (dist < dynDetect) setPreyState('ALERT');
+      maxSpd = cfg.walkSpeed * 0.7;
+      break;
+  }
+  integrate(prey, dt, maxSpd);
+  updateTrail(prey.trail, prey.pos);
+  prey.ring.position.set(prey.pos.x, 0.12, prey.pos.z);
+}
+
+// ════════════════════════════════════════════════════
+// ミニグラフ
+// ════════════════════════════════════════════════════
+function drawGraph() {
+  const cv = document.getElementById('mini');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(0,0,W,H);
+  if (distHist.length < 2) return;
+
+  const maxD = Math.max(...distHist, P_CFG.sightRange);
+
+  // 参照線
+  const drawHLine = (val, col, dash) => {
+    const y = H - (val/maxD)*H;
+    ctx.setLineDash(dash||[]); ctx.strokeStyle=col; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  };
+  drawHLine(P_CFG.sightRange, 'rgba(255,100,60,0.5)', [3,3]);
+  drawHLine(CATCH_D, 'rgba(255,30,30,0.9)', []);
+  ctx.setLineDash([]);
+
+  // 距離カーブ
+  ctx.strokeStyle='#88aaff'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  for (let i=0; i<distHist.length; i++) {
+    const x = (i/(HIST_MAX-1))*W;
+    const y = H - (distHist[i]/maxD)*H;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // ラベル
+  ctx.fillStyle='rgba(180,200,255,0.45)'; ctx.font='8px Courier New';
+  ctx.fillText('距離', 2, 10);
+  ctx.fillText(maxD.toFixed(0)+'m', W-28, 10);
+  ctx.fillText('0', 2, H-2);
+
+  // 凡例
+  ctx.fillStyle='rgba(255,100,60,0.6)'; ctx.fillText('— 視野', W-44, H*0.35);
+  ctx.fillStyle='rgba(255,30,30,0.8)'; ctx.fillText('— 捕獲', W-44, H*0.55);
+}
+
+// ════════════════════════════════════════════════════
+// UI更新
+// ════════════════════════════════════════════════════
+function updateUI(dist) {
+  // チーター
+  const pe = Math.round(pred.energy*100);
+  document.getElementById('p-epct').textContent = pe;
+  const peb = document.getElementById('p-ebar');
+  peb.style.width = pe+'%';
+  peb.style.background = pe>50?'#ff6644':pe>20?'#ffaa00':'#446677';
+  const pb = document.getElementById('p-badge');
+  pb.textContent = pred.state; pb.style.background = BADGE_COL[pred.state]||'#444';
+
+  // インパラ
+  const qs = Math.round(prey.stamina*100);
+  document.getElementById('q-epct').textContent = qs;
+  const qeb = document.getElementById('q-ebar');
+  qeb.style.width = qs+'%';
+  qeb.style.background = qs>50?'#44dd88':qs>20?'#aadd44':'#446655';
+  const qb = document.getElementById('q-badge');
+  qb.textContent = prey.state; qb.style.background = BADGE_COL[prey.state]||'#444';
+  qb.style.color = prey.state==='ALERT'?'#222':'#fff';
+
+  document.getElementById('dist-val').textContent = dist.toFixed(1)+' m';
+
+  // 統計
+  document.getElementById('s-chases').textContent = pred.totalChases;
+  document.getElementById('s-catches').textContent = catches;
+  document.getElementById('s-rate').textContent = pred.totalChases>0
+    ? Math.round(catches/pred.totalChases*100)+'%' : '—';
+  const avgCh = pred.chaseDurs.length
+    ? (pred.chaseDurs.reduce((a,b)=>a+b,0)/pred.chaseDurs.length).toFixed(1)+'s' : '—';
+  document.getElementById('s-avgch').textContent = avgCh;
+  document.getElementById('s-time').textContent = Math.floor(simTime)+' s';
+
+  drawGraph();
+}
+
+// ════════════════════════════════════════════════════
+// メインループ
+// ════════════════════════════════════════════════════
+let lastT = null;
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  if (!lastT) { lastT = ts; return; }
+  let rawDt = Math.min((ts - lastT)/1000, 0.05);
+  lastT = ts;
+
+  if (!paused && pred && prey) {
+    const dt = rawDt * speedMult;
+    simTime += dt;
+
+    tickPredator(dt);
+    tickPrey(dt);
+
+    // 捕獲判定
+    const dist = pred.pos.distanceTo(prey.pos);
+    if (dist < CATCH_D && pred.state === 'CHASE') {
+      catches++;
+      pred.chaseDurs.push(simTime - pred.chaseStart);
+      pred.energy = Math.min(1, pred.energy + 0.25); // 食事でエネルギー回復
+      setPredState('PATROL');
+      setPreyState('GRAZE');
+      // インパラを安全な位置に再配置
+      const np = randomPos(55, pred.pos);
+      prey.pos.copy(np);
+      prey.vel.set((Math.random()-0.5)*2, 0, (Math.random()-0.5)*2).normalize().multiplyScalar(2);
+      prey.stamina = 1.0;
+      prey.trail.pts = [];
+    }
+
+    // 距離履歴
+    distHist.push(dist);
+    if (distHist.length > HIST_MAX) distHist.shift();
+
+    // 速度ベクトル矢印
+    const showVec = document.getElementById('ck-vec').checked;
+    if (showVec) {
+      if (pred.vel.lengthSq()>0.01) {
+        pred.arrow.position.copy(pred.pos).add(new THREE.Vector3(0,3,0));
+        pred.arrow.setDirection(pred.vel.clone().normalize());
+        pred.arrow.setLength(Math.max(2, pred.vel.length()*0.5));
+        pred.arrow.visible = true;
+      }
+      if (prey.vel.lengthSq()>0.01) {
+        prey.arrow.position.copy(prey.pos).add(new THREE.Vector3(0,3,0));
+        prey.arrow.setDirection(prey.vel.clone().normalize());
+        prey.arrow.setLength(Math.max(2, prey.vel.length()*0.5));
+        prey.arrow.visible = true;
+      }
+    } else {
+      pred.arrow.visible = false;
+      prey.arrow.visible = false;
+    }
+
+    // 表示オプション
+    pred.trail.line.visible = document.getElementById('ck-trail').checked;
+    prey.trail.line.visible = document.getElementById('ck-trail').checked;
+    pred.ring.visible = document.getElementById('ck-range').checked;
+    prey.ring.visible = document.getElementById('ck-range').checked;
+    treeGroup.visible = document.getElementById('ck-tree').checked;
+
+    updateUI(dist);
+  }
+
+  tickCamera();
+  renderer.render(scene, camera);
+}
+
+// ════════════════════════════════════════════════════
+// コントロール
+// ════════════════════════════════════════════════════
+document.getElementById('btn-reset').addEventListener('click', () => {
+  buildAnimals();
+  simTime=0; catches=0; distHist.length=0;
+});
+document.getElementById('btn-pause').addEventListener('click', function() {
+  paused = !paused;
+  this.textContent = paused ? '▶ 再開' : '⏸ 一時停止';
+});
+document.getElementById('btn-cam').addEventListener('click', () => {
+  camMode = (camMode+1)%4;
+  document.getElementById('cam-mode').textContent = CAM_LABELS[camMode];
+});
+document.getElementById('spd').addEventListener('input', function() {
+  speedMult = parseFloat(this.value);
+  document.getElementById('speed-lbl').textContent = speedMult.toFixed(2)+' ×';
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// 起動
+buildAnimals();
+animate(0);
+</script>
+</body>
+</html>

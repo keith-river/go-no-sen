@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ハチドリ vs トンボ 3D空中戦 RL | 後の先・先々の先 創発</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#030510; font-family:'Courier New',monospace; overflow:hidden; color:#ccc; }
+#c { position:fixed; inset:0; }
+
+.panel {
+  position:fixed; top:10px; background:rgba(3,5,16,0.9);
+  border:1px solid rgba(120,160,255,0.16); border-radius:8px;
+  padding:10px; font-size:11px; backdrop-filter:blur(7px); z-index:100;
+}
+#lp { left:10px; width:218px; display:flex; flex-direction:column; gap:8px; }
+#rp { right:10px; width:230px; display:flex; flex-direction:column; gap:8px; }
+
+.stitle { font-size:10px; color:#7af; text-transform:uppercase; letter-spacing:1.1px; margin-bottom:5px; }
+.sec { border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:7px; }
+.sec:last-child { border-bottom:none; padding-bottom:0; }
+
+/* 動物カード */
+.acard { border-radius:5px; padding:7px; margin-bottom:5px; }
+.ac-h { background:rgba(200,40,80,0.12); border:1px solid rgba(200,40,80,0.25); }
+.ac-d { background:rgba(20,180,180,0.1); border:1px solid rgba(20,180,180,0.22); }
+.acard:last-child { margin-bottom:0; }
+.ahead { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+.aname { font-size:11px; font-weight:bold; }
+.sbadge { font-size:9px; padding:1px 5px; border-radius:3px; color:#fff; }
+.ebg { height:5px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden; margin-bottom:2px; }
+.ebar { height:100%; border-radius:3px; transition:width .15s, background .3s; }
+.esub { font-size:9px; color:#555; }
+.astat { display:grid; grid-template-columns:1fr 1fr; gap:2px; margin-top:4px; font-size:9px; }
+.astat span { color:#adf; }
+
+/* RL stats */
+.rlrow { display:flex; justify-content:space-between; margin-bottom:2px; font-size:10px; }
+.rlv { color:#adf; font-variant-numeric:tabular-nums; }
+
+/* 指標バー */
+.mrow { margin-bottom:5px; }
+.mlabel { display:flex; justify-content:space-between; font-size:9.5px; margin-bottom:2px; }
+.mbg { height:9px; background:rgba(255,255,255,0.07); border-radius:4px; overflow:hidden; }
+.mbar { height:100%; border-radius:4px; transition:width 1s; }
+.mdesc { font-size:8px; color:#444; margin-top:1px; }
+
+/* Arms race */
+#arms { height:16px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden; position:relative; }
+#arms-h { position:absolute; left:0; top:0; height:100%; background:rgba(200,40,80,0.7); transition:width .5s; }
+#arms-d { position:absolute; right:0; top:0; height:100%; background:rgba(20,180,180,0.7); transition:width .5s; }
+#arms-lbl { position:absolute; left:50%; transform:translateX(-50%); top:1px; font-size:9px; color:rgba(255,255,255,0.6); }
+
+button {
+  background:rgba(70,110,255,0.15); border:1px solid rgba(70,110,255,0.3);
+  color:#aad; padding:4px 7px; border-radius:4px;
+  cursor:pointer; font-size:10px; font-family:inherit;
+}
+button:hover { background:rgba(70,110,255,0.35); }
+button.on { background:rgba(70,200,120,0.2); border-color:rgba(70,200,120,0.45); color:#8fa; }
+
+input[type=range] { width:100%; accent-color:#7af; }
+canvas.g { width:100%; height:52px; border-radius:3px; display:block; }
+
+.mode-tabs { display:flex; gap:3px; }
+.mtab { flex:1; text-align:center; padding:3px; border-radius:4px; cursor:pointer;
+  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+  font-size:9px; color:#666; }
+.mtab.on { background:rgba(100,170,255,0.18); border-color:rgba(100,170,255,0.45); color:#adf; }
+
+.badge-3d { font-size:9px; padding:1px 4px; border-radius:2px; background:rgba(255,255,255,0.1); color:#88aaff; }
+
+#foot { position:fixed; bottom:7px; left:10px; font-size:9px; color:rgba(160,180,255,0.35); z-index:100; }
+#camlab { position:fixed; bottom:7px; right:10px; font-size:10px;
+  color:rgba(180,200,255,0.55); background:rgba(0,0,0,0.4); padding:3px 8px; border-radius:4px; z-index:100; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- ── 左パネル ── -->
+<div class="panel" id="lp">
+  <div class="sec">
+    <div class="stitle">🦅 3D空中戦 RL Sim</div>
+    <div style="font-size:9px;color:#445;margin-bottom:5px">
+      全エージェントDQN独立学習 | 共進化アームズレース
+    </div>
+    <div class="mode-tabs">
+      <div class="mtab on" id="tab-ind" onclick="setTrainMode('ind')">独立学習<br>各自DQN</div>
+      <div class="mtab"    id="tab-sp"  onclick="setTrainMode('sp')">自己対戦<br>役交替</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">動物状態</div>
+    <div class="acard ac-h">
+      <div class="ahead">
+        <span class="aname" style="color:#ff7799">🐦 ハチドリ (捕食者)</span>
+        <span class="sbadge" id="h-badge" style="background:#552233">—</span>
+      </div>
+      <div class="ebg"><div class="ebar" id="h-ebar" style="width:100%;background:#ff6699"></div></div>
+      <div class="esub">エネルギー <span id="h-epct">100</span>% | 高度 <span id="h-alt">--</span>m</div>
+      <div class="astat">
+        <div>速度: <span id="h-spd">0</span>m/s</div>
+        <div>捕獲: <span id="h-catch">0</span></div>
+      </div>
+    </div>
+    <div class="acard ac-d">
+      <div class="ahead">
+        <span class="aname" style="color:#44ddcc">🪲 トンボ (被食者)</span>
+        <span class="sbadge" id="d-badge" style="background:#115555">—</span>
+      </div>
+      <div class="ebg"><div class="ebar" id="d-ebar" style="width:100%;background:#22ddcc"></div></div>
+      <div class="esub">スタミナ <span id="d-epct">100</span>% | 高度 <span id="d-alt">--</span>m</div>
+      <div class="astat">
+        <div>速度: <span id="d-spd">0</span>m/s</div>
+        <div>逃脱: <span id="d-esc">0</span></div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-top:3px">
+      3D距離: <span id="dist3d" style="color:#adf">-- m</span>
+      <span class="badge-3d" id="alt-diff">Δy: --</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">RL ステータス</div>
+    <div class="rlrow"><span>エピソード</span><span class="rlv" id="rl-ep">0</span></div>
+    <div class="rlrow"><span>ε (ハチドリ/トンボ)</span><span class="rlv" id="rl-eps">1.0 / 1.0</span></div>
+    <div class="rlrow"><span>捕獲率</span><span class="rlv" id="rl-cr">0/0 (0%)</span></div>
+    <div class="rlrow"><span>エピソード時間</span><span class="rlv" id="rl-et">0s</span></div>
+    <div class="rlrow"><span>バッファ (H/D)</span><span class="rlv" id="rl-buf">0/0</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">アームズレース</div>
+    <div id="arms">
+      <div id="arms-h" style="width:50%"></div>
+      <div id="arms-d" style="width:50%"></div>
+      <div id="arms-lbl">均衡</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:#555;margin-top:2px">
+      <span style="color:rgba(200,40,80,0.7)">← ハチドリ優勢</span>
+      <span style="color:rgba(20,180,180,0.7)">トンボ優勢 →</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="stitle">速度倍率</div>
+    <input type="range" id="spd" min="1" max="30" step="1" value="12">
+    <div id="spd-lbl" style="text-align:center;font-size:10px;color:#adf">12 ×</div>
+  </div>
+
+  <div style="display:flex;gap:4px;flex-wrap:wrap">
+    <button id="btn-rst">リセット</button>
+    <button id="btn-pause">⏸ 停止</button>
+    <button id="btn-cam">カメラ ▶</button>
+    <button id="btn-test" onclick="toggleTest()">🎯 テスト</button>
+    <button id="btn-trails" class="on" onclick="toggleTrails()">軌跡</button>
+  </div>
+</div>
+
+<!-- ── 右パネル ── -->
+<div class="panel" id="rp">
+
+  <!-- ハチドリ 指標 -->
+  <div class="sec">
+    <div class="stitle" style="color:#ff9aaa">🐦 ハチドリ 攻撃様式指標</div>
+
+    <div class="mrow">
+      <div class="mlabel"><span>① 先々の先率（上空制圧）</span><span id="h1v" style="color:#ff9aaa">0%</span></div>
+      <div class="mbg"><div class="mbar" id="h1b" style="width:0%;background:#ff6699"></div></div>
+      <div class="mdesc">捕獲時、自分がトンボより5m以上高い位置にいた割合</div>
+    </div>
+    <div class="mrow">
+      <div class="mlabel"><span>② 高速突入率（対の先）</span><span id="h2v" style="color:#ff9aaa">0%</span></div>
+      <div class="mbg"><div class="mbar" id="h2b" style="width:0%;background:#ff4477"></div></div>
+      <div class="mdesc">捕獲時スプリント速度(>0.8vmax)だった割合</div>
+    </div>
+    <div class="mrow">
+      <div class="mlabel"><span>③ 急降下捕獲率</span><span id="h3v" style="color:#ff9aaa">0%</span></div>
+      <div class="mbg"><div class="mbar" id="h3b" style="width:0%;background:#cc3366"></div></div>
+      <div class="mdesc">捕獲直前1s間、下向き速度成分 > 3m/s の割合</div>
+    </div>
+    <div class="mrow">
+      <div class="mlabel"><span>④ 捕獲効率（残エネルギー）</span><span id="h4v" style="color:#ff9aaa">0%</span></div>
+      <div class="mbg"><div class="mbar" id="h4b" style="width:0%;background:#aa2244"></div></div>
+      <div class="mdesc">捕獲時の残エネルギー平均（高い = 無駄なく仕留めた）</div>
+    </div>
+    <canvas class="g" id="g-h" width="210" height="52"></canvas>
+  </div>
+
+  <!-- トンボ 指標 -->
+  <div class="sec">
+    <div class="stitle" style="color:#55eecc">🪲 トンボ 回避様式指標</div>
+
+    <div class="mrow">
+      <div class="mlabel"><span>① 後の先率（土壇場回避）</span><span id="d1v" style="color:#55eecc">0%</span></div>
+      <div class="mbg"><div class="mbar" id="d1b" style="width:0%;background:#22ccbb"></div></div>
+      <div class="mdesc">ハチドリ接近後に方向転換 → ニアミス回避した割合</div>
+    </div>
+    <div class="mrow">
+      <div class="mlabel"><span>② 垂直回避率（直交逃げ）</span><span id="d2v" style="color:#55eecc">0%</span></div>
+      <div class="mbg"><div class="mbar" id="d2b" style="width:0%;background:#11aaaa"></div></div>
+      <div class="mdesc">回避方向が攻撃ベクトルと70°以上直交していた割合</div>
+    </div>
+    <div class="mrow">
+      <div class="mlabel"><span>③ 先々の先率（先読み離脱）</span><span id="d3v" style="color:#55eecc">0%</span></div>
+      <div class="mbg"><div class="mbar" id="d3b" style="width:0%;background:#009988"></div></div>
+      <div class="mdesc">ハチドリが中距離(8-20m)接近中に先手で退避した割合</div>
+    </div>
+    <div class="mrow">
+      <div class="mlabel"><span>④ 3D高度活用率</span><span id="d4v" style="color:#55eecc">0%</span></div>
+      <div class="mbg"><div class="mbar" id="d4b" style="width:0%;background:#007766"></div></div>
+      <div class="mdesc">回避時に高度変化±3m以上使った割合（3D空間活用）</div>
+    </div>
+    <canvas class="g" id="g-d" width="210" height="52"></canvas>
+  </div>
+
+  <!-- 難易度メモ -->
+  <div class="sec" style="font-size:9px;color:#334;line-height:1.65">
+    <div style="color:#556;margin-bottom:3px">【Stage1-3との難易度差】</div>
+    ・状態空間: 2D→3D (高度追加)<br>
+    ・両エージェント同時学習 = 非定常環境<br>
+    ・共進化: 一方が進化すると相手も適応<br>
+    ・トンボ質量極小 → 瞬時方向転換可<br>
+    ・ハチドリ慣性大 → 先読み必須
+  </div>
+</div>
+
+<div id="foot">マウスドラッグ:回転 | ホイール:ズーム | 高速倍率推奨: 15-25×</div>
+<div id="camlab">📷 フリーカメラ</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════
+// 定数
+// ════════════════════════════════════════════════
+const WORLD  = 90;
+const MIN_Y  = 2;
+const MAX_Y  = 42;
+const CATCH_D = 1.8;
+const SIM_DT  = 0.06;
+const EP_MAX  = 55;
+const TRAIL_LEN = 130;
+
+// アクション: 6軸 × 3速度 + ホバー = 19
+// 方向ベクトル (正規化済み)
+const BASE_DIRS = [
+  new THREE.Vector3( 1, 0, 0), new THREE.Vector3(-1, 0, 0),
+  new THREE.Vector3( 0, 1, 0), new THREE.Vector3( 0,-1, 0),
+  new THREE.Vector3( 0, 0, 1), new THREE.Vector3( 0, 0,-1),
+];
+const N_ACT = 19; // 6×3 + hover
+
+// ハチドリ物理
+const H_CFG = {
+  speeds: [5, 13, 23],  // m/s: 巡航/速足/急降下スプリント
+  mass: 1.4, maxF: 50,
+  eDrain: [0.005, 0.015, 1/7],    // per second per speed level
+  eRecover: 0.012,
+  minY: MIN_Y, maxY: MAX_Y,
+};
+// トンボ物理 (超高機動)
+const D_CFG = {
+  speeds: [3, 7, 11],
+  mass: 0.35, maxF: 90,            // 加速度 = 90/0.35 = 257 m/s² (超高機動!)
+  sDrain: [0.002, 0.008, 0.02],
+  sRecover: 0.018,
+  minY: MIN_Y, maxY: MAX_Y,
+};
+
+// ════════════════════════════════════════════════
+// Three.js セットアップ
+// ════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.85;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a1a35);
+scene.fog = new THREE.FogExp2(0x0a1828, 0.009);
+
+const cam = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 500);
+cam.position.set(0, 50, 110);
+cam.lookAt(0, 20, 0);
+
+// ライト
+scene.add(new THREE.AmbientLight(0xb0c8ff, 0.5));
+const sun = new THREE.DirectionalLight(0xffe8c0, 1.0);
+sun.position.set(40, 100, 30); sun.castShadow = true;
+sun.shadow.mapSize.setScalar(1024);
+sun.shadow.camera.near=.5; sun.shadow.camera.far=400;
+['left','right','top','bottom'].forEach((k,i)=>sun.shadow.camera[k]=[-180,180,180,-180][i]);
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0x4488cc, 0x224422, 0.4));
+
+// 地面
+const gnd = new THREE.Mesh(
+  new THREE.PlaneGeometry(WORLD*2.5, WORLD*2.5),
+  new THREE.MeshLambertMaterial({color:0x2a5a2a})
+);
+gnd.rotation.x = -Math.PI/2; gnd.receiveShadow = true; scene.add(gnd);
+
+// グリッド（地上）
+const grid = new THREE.GridHelper(WORLD*2.5, 20, 0x336633, 0x224422);
+grid.position.y = 0.06; grid.material.opacity=0.3; grid.material.transparent=true;
+scene.add(grid);
+
+// 境界ボックス（ワイヤーフレーム）
+{
+  const be = new THREE.EdgesGeometry(new THREE.BoxGeometry(WORLD*2, MAX_Y-MIN_Y, WORLD*2));
+  const bl = new THREE.LineSegments(be,
+    new THREE.LineBasicMaterial({color:0x223355, opacity:0.25, transparent:true}));
+  bl.position.y = (MAX_Y+MIN_Y)/2; scene.add(bl);
+}
+
+// 雲（視覚的な高度感）
+function makeClouds(){
+  const cm = new THREE.MeshBasicMaterial({color:0xeef8ff, transparent:true, opacity:0.18});
+  for(let i=0;i<14;i++){
+    const cx = (Math.random()-.5)*WORLD*1.8;
+    const cy = 15 + Math.random()*22;
+    const cz = (Math.random()-.5)*WORLD*1.8;
+    const g = new THREE.Group();
+    for(let j=0;j<4;j++){
+      const c = new THREE.Mesh(new THREE.SphereGeometry(4+Math.random()*5,7,7),cm);
+      c.position.set((Math.random()-.5)*8,( Math.random()-.5)*2,(Math.random()-.5)*8);
+      g.add(c);
+    }
+    g.position.set(cx,cy,cz); scene.add(g);
+  }
+}
+makeClouds();
+
+// ════════════════════════════════════════════════
+// カメラ制御
+// ════════════════════════════════════════════════
+let camTheta=0.3, camPhi=0.55, camR=140;
+const camTgt=new THREE.Vector3(0,20,0), camCur=new THREE.Vector3(0,50,110);
+let camMode=0, dragging=false, lmx=0, lmy=0;
+const CAM_NAMES=['📷 フリー','🔴 ハチドリ追跡','🟢 トンボ追跡','🦅 俯瞰'];
+
+canvas.addEventListener('pointerdown',e=>{dragging=true;lmx=e.clientX;lmy=e.clientY;});
+canvas.addEventListener('pointerup',()=>dragging=false);
+canvas.addEventListener('pointermove',e=>{
+  if(!dragging||camMode!==0) return;
+  camTheta-=(e.clientX-lmx)*.004;
+  camPhi=Math.max(.05,Math.min(1.4,camPhi+(e.clientY-lmy)*.004));
+  lmx=e.clientX; lmy=e.clientY;
+});
+canvas.addEventListener('wheel',e=>camR=Math.max(15,Math.min(300,camR+e.deltaY*.12)));
+
+function tickCam(){
+  let tp, pos;
+  const mid = hbird&&dragon ? hbird.pos.clone().add(dragon.pos).multiplyScalar(.5) : new THREE.Vector3(0,20,0);
+  if(camMode===0){
+    tp=new THREE.Vector3(0,20,0);
+    pos=new THREE.Vector3(camR*Math.sin(camTheta)*Math.cos(camPhi),
+      Math.max(5,camR*Math.sin(camPhi)), camR*Math.cos(camTheta)*Math.cos(camPhi));
+  } else if(camMode===1&&hbird){
+    tp=hbird.pos.clone();
+    const bk=hbird.vel.length()>.5?hbird.vel.clone().normalize().multiplyScalar(-28):new THREE.Vector3(0,0,28);
+    pos=hbird.pos.clone().add(bk).add(new THREE.Vector3(0,16,0));
+  } else if(camMode===2&&dragon){
+    tp=dragon.pos.clone();
+    const bk=dragon.vel.length()>.5?dragon.vel.clone().normalize().multiplyScalar(-20):new THREE.Vector3(0,0,20);
+    pos=dragon.pos.clone().add(bk).add(new THREE.Vector3(0,12,0));
+  } else {
+    tp=new THREE.Vector3(0,0,0); pos=new THREE.Vector3(0,180,0);
+  }
+  camCur.lerp(pos,.06); camTgt.lerp(tp,.07);
+  cam.position.copy(camCur); cam.lookAt(camTgt);
+}
+
+// ════════════════════════════════════════════════
+// メッシュ生成
+// ════════════════════════════════════════════════
+function makeHummingbirdMesh(){
+  const g=new THREE.Group();
+  // 胴体（+Z前方）
+  const bm=new THREE.MeshLambertMaterial({color:0xcc2255});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(.42,10,8),bm);
+  body.scale.set(.75,1,1.6); body.castShadow=true; g.add(body);
+  // 喉（ゴジェット）
+  const gorget=new THREE.Mesh(new THREE.SphereGeometry(.2,8,8),
+    new THREE.MeshLambertMaterial({color:0xff3300,emissive:0x661100}));
+  gorget.position.set(0,-.1,.55); g.add(gorget);
+  // くちばし
+  const beak=new THREE.Mesh(new THREE.CylinderGeometry(.04,.07,1.0,6),
+    new THREE.MeshLambertMaterial({color:0x222222}));
+  beak.rotation.x=Math.PI/2; beak.position.set(0,.02,.92); g.add(beak);
+  // 翼（半透明、高速振動イメージ）
+  const wm=new THREE.MeshBasicMaterial({color:0xaaccff,transparent:true,opacity:.28,side:THREE.DoubleSide});
+  const wg=new THREE.PlaneGeometry(1.6,.65);
+  const wL=new THREE.Mesh(wg,wm); wL.position.set(-.85,.25,.1); wL.rotation.z=.25; g.add(wL);
+  const wR=new THREE.Mesh(wg,wm); wR.position.set( .85,.25,.1); wR.rotation.z=-.25; g.add(wR);
+  // 尾
+  const tail=new THREE.Mesh(new THREE.ConeGeometry(.15,.5,5),bm);
+  tail.rotation.x=-Math.PI/2; tail.position.set(0,0,-.75); g.add(tail);
+  // 目
+  const em=new THREE.MeshBasicMaterial({color:0xffff33});
+  [-0.18,0.18].forEach(ox=>{
+    const e=new THREE.Mesh(new THREE.SphereGeometry(.08,6,6),em);
+    e.position.set(ox,.18,.65); g.add(e);
+  });
+  return{group:g,wL,wR};
+}
+
+function makeDragonflyMesh(){
+  const g=new THREE.Group();
+  // 胸部
+  const thorM=new THREE.MeshLambertMaterial({color:0x11aaaa,emissive:0x003333});
+  const thorax=new THREE.Mesh(new THREE.SphereGeometry(.32,9,8),thorM);
+  thorax.scale.z=1.1; g.add(thorax);
+  // 腹部（後方 = -Z）
+  const abdM=new THREE.MeshLambertMaterial({color:0x0088aa});
+  const abdomen=new THREE.Mesh(new THREE.CylinderGeometry(.1,.16,2.2,8),abdM);
+  abdomen.rotation.x=Math.PI/2; abdomen.position.z=-1.35; g.add(abdomen);
+  // 頭部（前方 = +Z）
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.28,8,8),
+    new THREE.MeshLambertMaterial({color:0x22bbcc}));
+  head.position.z=.6; g.add(head);
+  // 複眼（巨大）
+  const eyeM=new THREE.MeshLambertMaterial({color:0x004400,emissive:0x001100});
+  [-0.22,0.22].forEach(ox=>{
+    const e=new THREE.Mesh(new THREE.SphereGeometry(.2,8,8),eyeM);
+    e.position.set(ox,.06,.68); g.add(e);
+  });
+  // 翅 4枚（+ 字型）
+  const wingMat=new THREE.MeshBasicMaterial({color:0xaaffee,transparent:true,opacity:.32,side:THREE.DoubleSide});
+  const wings=[];
+  // 前翅（±X, z=0.05）
+  [[-1.1,0,.05],[1.1,0,.05]].forEach(([x,y,z])=>{
+    const w=new THREE.Mesh(new THREE.PlaneGeometry(1.0,.4),wingMat);
+    w.position.set(x,y,z); w.rotation.y=x<0?-.12:.12; wings.push(w); g.add(w);
+  });
+  // 後翅（±X, z=-0.3）
+  [[-1.0,0,-.3],[1.0,0,-.3]].forEach(([x,y,z])=>{
+    const w=new THREE.Mesh(new THREE.PlaneGeometry(.9,.42),wingMat);
+    w.position.set(x,y,z); w.rotation.y=x<0?-.1:.1; wings.push(w); g.add(w);
+  });
+  return{group:g,wings};
+}
+
+// ════════════════════════════════════════════════
+// 3Dトレイル + 高度インジケーター + 地面影
+// ════════════════════════════════════════════════
+function makeTrail3D(col){
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(TRAIL_LEN*3),3));
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:col,opacity:.55,transparent:true}));
+  scene.add(line); return{geo,line,pts:[]};
+}
+function pushTrail3D(tr,pos){
+  tr.pts.push(pos.clone()); if(tr.pts.length>TRAIL_LEN)tr.pts.shift();
+  const a=tr.geo.attributes.position, n=tr.pts.length;
+  for(let i=0;i<n;i++) a.setXYZ(i,tr.pts[i].x,tr.pts[i].y,tr.pts[i].z);
+  const L=tr.pts[n-1]; for(let i=n;i<TRAIL_LEN;i++) a.setXYZ(i,L.x,L.y,L.z);
+  tr.geo.setDrawRange(0,n); a.needsUpdate=true;
+}
+
+function makeAltLine(col){
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:col,opacity:.28,transparent:true}));
+  scene.add(line); return{geo,line};
+}
+function updateAltLine(al,pos){
+  const a=al.geo.attributes.position;
+  a.setXYZ(0,pos.x,.1,pos.z); a.setXYZ(1,pos.x,pos.y,pos.z); a.needsUpdate=true;
+}
+
+function makeGroundShadow(){
+  const m=new THREE.Mesh(
+    new THREE.CircleGeometry(1,14),
+    new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.22})
+  );
+  m.rotation.x=-Math.PI/2; m.position.y=.08; scene.add(m); return m;
+}
+function updateShadow(sh,pos){
+  const sc=Math.max(.25,1-pos.y/MAX_Y)*1.5;
+  sh.scale.setScalar(sc); sh.position.set(pos.x,.08,pos.z);
+}
+
+// ════════════════════════════════════════════════
+// MLP (2層, 10入力 → 48隠れ → 19出力)
+// ════════════════════════════════════════════════
+function randn(s){ return Math.sqrt(-2*Math.log(Math.random()+1e-10))*Math.cos(2*Math.PI*Math.random())*s; }
+class MLP {
+  constructor(inS=10,h=48,outS=N_ACT){
+    const s1=Math.sqrt(2/inS), s2=Math.sqrt(2/h);
+    this.W1=Array.from({length:h},()=>Float32Array.from({length:inS},()=>randn(s1)));
+    this.b1=new Float32Array(h);
+    this.W2=Array.from({length:outS},()=>Float32Array.from({length:h},()=>randn(s2)));
+    this.b2=new Float32Array(outS);
+    this.mW1=this.W1.map(r=>new Float32Array(r.length));
+    this.vW1=this.W1.map(r=>new Float32Array(r.length));
+    this.mW2=this.W2.map(r=>new Float32Array(r.length));
+    this.vW2=this.W2.map(r=>new Float32Array(r.length));
+    this.mb1=new Float32Array(h); this.vb1=new Float32Array(h);
+    this.mb2=new Float32Array(outS); this.vb2=new Float32Array(outS);
+    this.t=0; this.lr=8e-4; this.b1c=.9; this.b2c=.999;
+  }
+  fwd(x){
+    const h1=new Float32Array(this.W1.length);
+    for(let j=0;j<h1.length;j++){
+      let s=this.b1[j]; for(let k=0;k<x.length;k++) s+=this.W1[j][k]*x[k];
+      h1[j]=Math.max(0,s);
+    }
+    const out=new Float32Array(this.W2.length);
+    for(let j=0;j<out.length;j++){
+      let s=this.b2[j]; for(let k=0;k<h1.length;k++) s+=this.W2[j][k]*h1[k];
+      out[j]=s;
+    }
+    this._x=x; this._h1=h1; return out;
+  }
+  tdBack(act,err){
+    this.t++;
+    const bc1=1-Math.pow(this.b1c,this.t), bc2=1-Math.pow(this.b2c,this.t);
+    const aW=(W,mW,vW,j,k,g)=>{
+      mW[j][k]=this.b1c*mW[j][k]+(1-this.b1c)*g;
+      vW[j][k]=this.b2c*vW[j][k]+(1-this.b2c)*g*g;
+      W[j][k]-=this.lr*(mW[j][k]/bc1)/(Math.sqrt(vW[j][k]/bc2)+1e-8);
+    };
+    const aB=(b,mb,vb,j,g)=>{
+      mb[j]=this.b1c*mb[j]+(1-this.b1c)*g;
+      vb[j]=this.b2c*vb[j]+(1-this.b2c)*g*g;
+      b[j]-=this.lr*(mb[j]/bc1)/(Math.sqrt(vb[j]/bc2)+1e-8);
+    };
+    const dH1=new Float32Array(this._h1.length);
+    for(let k=0;k<dH1.length;k++){
+      dH1[k]=(this._h1[k]>0)?err*this.W2[act][k]:0;
+      aW(this.W2,this.mW2,this.vW2,act,k,err*this._h1[k]);
+    }
+    aB(this.b2,this.mb2,this.vb2,act,err);
+    for(let j=0;j<this.W1.length;j++){
+      if(Math.abs(dH1[j])<1e-9)continue;
+      for(let k=0;k<this._x.length;k++) aW(this.W1,this.mW1,this.vW1,j,k,dH1[j]*this._x[k]);
+      aB(this.b1,this.mb1,this.vb1,j,dH1[j]);
+    }
+  }
+  copyFrom(s){
+    for(let j=0;j<this.W1.length;j++) this.W1[j].set(s.W1[j]); this.b1.set(s.b1);
+    for(let j=0;j<this.W2.length;j++) this.W2[j].set(s.W2[j]); this.b2.set(s.b2);
+  }
+}
+
+// ════════════════════════════════════════════════
+// DQN エージェント (両エージェント共通クラス)
+// ════════════════════════════════════════════════
+class DQNAgent {
+  constructor(name){
+    this.name=name;
+    this.net=new MLP(); this.tgt=new MLP(); this.tgt.copyFrom(this.net);
+    this.buf=[]; this.bufMax=8000; this.bsz=32;
+    this.eps=1.0; this.epsDecay=.995; this.epsMin=.04;
+    this.gamma=.95; this.step=0; this.tgtFreq=250;
+    this.episode=0; this.epR=0; this.rwHist=[];
+    this.catchCount=0; this.trialCount=0;
+  }
+  act(sv){
+    if(Math.random()<this.eps) return Math.floor(Math.random()*N_ACT);
+    const q=this.net.fwd(sv); let b=0;
+    for(let a=1;a<N_ACT;a++) if(q[a]>q[b])b=a; return b;
+  }
+  best(sv){ const q=this.net.fwd(sv); let b=0; for(let a=1;a<N_ACT;a++) if(q[a]>q[b])b=a; return b; }
+  store(s,a,r,s2,done){ this.buf.push({s,a,r,s2,done}); if(this.buf.length>this.bufMax)this.buf.shift(); }
+  train(){
+    if(this.buf.length<this.bsz) return;
+    this.step++;
+    for(let i=0;i<this.bsz;i++){
+      const {s,a,r,s2,done}=this.buf[Math.floor(Math.random()*this.buf.length)];
+      const tq=this.tgt.fwd(s2);
+      const mq=done?0:Math.max(...tq);
+      const td=r+this.gamma*mq;
+      const cq=this.net.fwd(s);
+      this.net.tdBack(a,cq[a]-td);
+    }
+    if(this.step%this.tgtFreq===0) this.tgt.copyFrom(this.net);
+  }
+  endEp(result,epR){
+    this.rwHist.push(epR); if(this.rwHist.length>200)this.rwHist.shift();
+    if(result==='catch') this.catchCount++;
+    this.trialCount++;
+    this.eps=Math.max(this.epsMin,this.eps*this.epsDecay);
+    this.episode++;
+  }
+  catchRate(){ return this.trialCount>0?this.catchCount/this.trialCount:0; }
+}
+
+// ════════════════════════════════════════════════
+// 状態エンコーダー
+// 各エージェントから見た10次元相対状態
+// ════════════════════════════════════════════════
+function encodeH(h, d){  // ハチドリ視点 (捕食者)
+  const dx=(d.pos.x-h.pos.x)/WORLD, dy=(d.pos.y-h.pos.y)/MAX_Y, dz=(d.pos.z-h.pos.z)/WORLD;
+  const dist=h.pos.distanceTo(d.pos)/WORLD;
+  const closing=h.vel.clone().sub(d.vel).dot(d.pos.clone().sub(h.pos).normalize()) / H_CFG.speeds[2];
+  return new Float32Array([
+    dx, dy, dz, dist,
+    d.vel.x/D_CFG.speeds[2], d.vel.y/D_CFG.speeds[2], d.vel.z/D_CFG.speeds[2],
+    h.energy, h.pos.y/MAX_Y,
+    Math.max(-1,Math.min(1,closing)),  // 接近速度 (正=近づいている)
+  ]);
+}
+function encodeD(d, h){  // トンボ視点 (被食者)
+  const dx=(h.pos.x-d.pos.x)/WORLD, dy=(h.pos.y-d.pos.y)/MAX_Y, dz=(h.pos.z-d.pos.z)/WORLD;
+  const dist=d.pos.distanceTo(h.pos)/WORLD;
+  const threat=h.vel.clone().dot(d.pos.clone().sub(h.pos).normalize()) / H_CFG.speeds[2];
+  return new Float32Array([
+    dx, dy, dz, dist,
+    h.vel.x/H_CFG.speeds[2], h.vel.y/H_CFG.speeds[2], h.vel.z/H_CFG.speeds[2],
+    d.stamina, d.pos.y/MAX_Y,
+    Math.max(-1,Math.min(1,threat)),  // 脅威度 (正=ハチドリが向かってきている)
+  ]);
+}
+
+// ════════════════════════════════════════════════
+// アクション実行 (3D物理)
+// ════════════════════════════════════════════════
+function execAction3D(ent, actIdx, cfg){
+  if(actIdx>=18){ // hover/brake
+    ent.acc.add(ent.vel.clone().negate().multiplyScalar(10/cfg.mass));
+    return 0; // speed level for energy calc
+  }
+  const dirIdx=Math.floor(actIdx/3);
+  const spdIdx=actIdx%3;
+  const dir=BASE_DIRS[dirIdx].clone();
+  const spd=cfg.speeds[spdIdx];
+  const steer=dir.multiplyScalar(spd).sub(ent.vel).clampLength(0,cfg.maxF);
+  ent.acc.add(steer.divideScalar(cfg.mass));
+  return spdIdx;
+}
+
+function integrate3D(ent, dt, cfg){
+  ent.vel.add(ent.acc.clone().multiplyScalar(dt));
+  ent.vel.clampLength(0, cfg.speeds[2]);
+  ent.pos.add(ent.vel.clone().multiplyScalar(dt));
+  // 3D 境界
+  ent.pos.x=Math.max(-WORLD,Math.min(WORLD,ent.pos.x));
+  ent.pos.z=Math.max(-WORLD,Math.min(WORLD,ent.pos.z));
+  ent.pos.y=Math.max(cfg.minY,Math.min(cfg.maxY,ent.pos.y));
+  // 高度境界での速度補正
+  if(ent.pos.y<=cfg.minY+.5&&ent.vel.y<0) ent.vel.y=0;
+  if(ent.pos.y>=cfg.maxY-.5&&ent.vel.y>0) ent.vel.y=0;
+  ent.acc.set(0,0,0);
+  ent.group.position.copy(ent.pos);
+  if(ent.vel.length()>.15){
+    const look=ent.pos.clone().add(ent.vel);
+    ent.group.lookAt(look);
+  }
+}
+
+// 境界反発力
+function boundaryForce3D(pos, cfg){
+  const mg=18, f=new THREE.Vector3();
+  if(pos.x<-WORLD+mg) f.x=1; else if(pos.x>WORLD-mg) f.x=-1;
+  if(pos.z<-WORLD+mg) f.z=1; else if(pos.z>WORLD-mg) f.z=-1;
+  if(pos.y<cfg.minY+3) f.y=1; else if(pos.y>cfg.maxY-3) f.y=-1;
+  const d=Math.max(
+    Math.abs(pos.x)-WORLD+mg, Math.abs(pos.z)-WORLD+mg,
+    -(pos.y-cfg.minY-3), pos.y-(cfg.maxY-3), 0
+  );
+  return d>0 ? f.normalize().multiplyScalar(cfg.maxF*Math.min(d/mg,1)*2) : f;
+}
+
+// ════════════════════════════════════════════════
+// 行動様式 メトリクス
+// ════════════════════════════════════════════════
+const hMetrics = { events:[], speedBuf:[], velYBuf:[], m1:0,m2:0,m3:0,m4:0 };
+const dMetrics = { events:[], nearMissBuf:[], altChangeBuf:[], m1:0,m2:0,m3:0,m4:0 };
+
+// ハチドリが捕獲時にメトリクス記録
+function onCatch(h, d, epTime, hSpeedBuf, hVelYBuf){
+  const WIN=1.2;
+  // ① 先々の先率: 高度優位（上から）
+  const altAdv = h.pos.y - d.pos.y > 5;
+  // ② 高速突入率 (対の先)
+  const highSpd = h.vel.length() > H_CFG.speeds[2]*.78;
+  // ③ 急降下率: 直前1sで下向き速度あり
+  const recent=hVelYBuf.filter(v=>v.t>epTime-WIN);
+  const diving=recent.length>0&&recent.reduce((a,b)=>a+b.vy,0)/recent.length<-2.5;
+  // ④ 捕獲効率
+  const effic=h.energy;
+  hMetrics.events.push({altAdv,highSpd,diving,effic});
+  if(hMetrics.events.length>30) hMetrics.events.shift();
+  const n=hMetrics.events.length;
+  hMetrics.m1=hMetrics.events.filter(e=>e.altAdv).length/n;
+  hMetrics.m2=hMetrics.events.filter(e=>e.highSpd).length/n;
+  hMetrics.m3=hMetrics.events.filter(e=>e.diving).length/n;
+  hMetrics.m4=hMetrics.events.reduce((s,e)=>s+e.effic,0)/n;
+}
+
+// ニアミス (距離 < 6m でハチドリが通過) = トンボの逃脱成功
+function onNearMiss(h, d, dAccBuf, altBuf){
+  // ① 後の先: 接近してから方向転換
+  const hVelDir=h.vel.clone().normalize();
+  const dVelDir=d.vel.clone().normalize();
+  // ② 垂直逃げ: 逃げ方向が攻撃ベクトルと直交
+  const dot=Math.abs(hVelDir.dot(dVelDir));
+  const perpendicular=dot<Math.cos(Math.PI*70/180); // >70° 直交
+  // ③ 先読み離脱は別途追跡
+  const preemptive=dMetrics.earlyMoves||(dMetrics.events.filter(e=>e.preemptive).length);
+  // ④ 3D高度活用
+  const altDiff=altBuf.length>0?Math.abs(altBuf[altBuf.length-1].y-(altBuf[0].y||altBuf[altBuf.length-1].y)):0;
+  const used3D=altDiff>3;
+  dMetrics.events.push({goNoSen:true, perpendicular, preemptive:false, used3D});
+  if(dMetrics.events.length>40) dMetrics.events.shift();
+  const n=dMetrics.events.length;
+  dMetrics.m1=dMetrics.events.filter(e=>e.goNoSen).length/n;
+  dMetrics.m2=dMetrics.events.filter(e=>e.perpendicular).length/n;
+  dMetrics.m3=dMetrics.events.filter(e=>e.preemptive).length/n;
+  dMetrics.m4=dMetrics.events.filter(e=>e.used3D).length/n;
+}
+
+// ════════════════════════════════════════════════
+// エンティティ初期化
+// ════════════════════════════════════════════════
+let hbird=null, dragon=null;
+let agentH=new DQNAgent('hbird'), agentD=new DQNAgent('dragon');
+let epTime=0, prevDist=100, paused=false, testMode=false, speedMult=12;
+let trainMode='ind'; // 'ind'=独立, 'sp'=自己対戦
+let showTrails=true;
+let hEpR=0, dEpR=0;
+let hSpeedBuf=[], hVelYBuf=[], dAltBuf=[];
+let catchTotal=0, escapeTotal=0, nearMissTimer=0;
+let crHistory=[];
+
+function rnd3D(minDist, other, yMin=5, yMax=35){
+  let p;
+  do {
+    p=new THREE.Vector3(
+      (Math.random()-.5)*(WORLD*1.5),
+      yMin+Math.random()*(yMax-yMin),
+      (Math.random()-.5)*(WORLD*1.5)
+    );
+  } while(other&&p.distanceTo(other)<minDist);
+  return p;
+}
+
+function buildEntities(){
+  if(hbird){ scene.remove(hbird.group); scene.remove(hbird.trail.line); scene.remove(hbird.altLine.line); scene.remove(hbird.shadow); }
+  if(dragon){ scene.remove(dragon.group); scene.remove(dragon.trail.line); scene.remove(dragon.altLine.line); scene.remove(dragon.shadow); }
+
+  const hPos=rnd3D(0,null,8,30);
+  const dPos=rnd3D(50,hPos,5,25);
+
+  const hm=makeHummingbirdMesh();
+  hbird={
+    pos:hPos.clone(), vel:new THREE.Vector3(1,0,0), acc:new THREE.Vector3(),
+    energy:1.0, group:hm.group, wL:hm.wL, wR:hm.wR,
+    trail:makeTrail3D(0xcc3355), altLine:makeAltLine(0xff6688), shadow:makeGroundShadow(),
+    prevVelDir:new THREE.Vector3(0,0,1),
+  };
+  hbird.group.position.copy(hbird.pos); scene.add(hbird.group);
+
+  const dm=makeDragonflyMesh();
+  dragon={
+    pos:dPos.clone(), vel:new THREE.Vector3(-1,0,0), acc:new THREE.Vector3(),
+    stamina:1.0, group:dm.group, wings:dm.wings,
+    trail:makeTrail3D(0x11aaaa), altLine:makeAltLine(0x33ddcc), shadow:makeGroundShadow(),
+    prevPos:dPos.clone(), prevVelDir:new THREE.Vector3(0,0,-1),
+    recentlyManeuvered:false, velAngleAcc:0,
+  };
+  dragon.group.position.copy(dragon.pos); scene.add(dragon.group);
+
+  epTime=0; prevDist=hbird.pos.distanceTo(dragon.pos);
+  hEpR=0; dEpR=0;
+  hSpeedBuf=[]; hVelYBuf=[]; dAltBuf=[]; nearMissTimer=0;
+}
+
+// ════════════════════════════════════════════════
+// シミュレーション 1ステップ
+// ════════════════════════════════════════════════
+function simStep(){
+  const dt=SIM_DT;
+  epTime+=dt;
+  const t=epTime;
+
+  // ── ハチドリ ──
+  const sv_h=encodeH(hbird,dragon);
+  const act_h=testMode?agentH.best(sv_h):agentH.act(sv_h);
+  hbird.acc.add(boundaryForce3D(hbird.pos,H_CFG));
+  const spdH=execAction3D(hbird,act_h,H_CFG);
+  // エネルギー消費
+  hbird.energy=Math.max(0, hbird.energy-(spdH<0?-H_CFG.eRecover:H_CFG.eDrain[spdH])*dt);
+  integrate3D(hbird,dt,H_CFG);
+
+  // ── トンボ ──
+  const sv_d=encodeD(dragon,hbird);
+  const act_d=testMode?agentD.best(sv_d):agentD.act(sv_d);
+  dragon.acc.add(boundaryForce3D(dragon.pos,D_CFG));
+  const spdD=execAction3D(dragon,act_d,D_CFG);
+  dragon.stamina=Math.max(0, dragon.stamina-(spdD<0?-D_CFG.sRecover:D_CFG.sDrain[spdD])*dt);
+  integrate3D(dragon,dt,D_CFG);
+
+  // バッファ更新
+  hSpeedBuf.push({spd:hbird.vel.length(),t}); if(hSpeedBuf.length>300)hSpeedBuf.shift();
+  hVelYBuf.push({vy:hbird.vel.y,t}); if(hVelYBuf.length>300)hVelYBuf.shift();
+  dAltBuf.push({y:dragon.pos.y,t}); if(dAltBuf.length>60)dAltBuf.shift();
+
+  // トンボの方向転換検出
+  const dCurDir=dragon.vel.clone().normalize();
+  const dAngleDiff=dragon.vel.length()>.3?Math.acos(Math.max(-1,Math.min(1,dCurDir.dot(dragon.prevVelDir)))):0;
+  dragon.velAngleAcc=dragon.velAngleAcc*.9+dAngleDiff;
+  dragon.recentlyManeuvered=dragon.velAngleAcc>0.4;
+  dragon.prevVelDir=dCurDir.length()>.1?dCurDir:dragon.prevVelDir;
+
+  const dist=hbird.pos.distanceTo(dragon.pos);
+  const dDist=prevDist-dist; // 正=接近
+
+  // ── 報酬計算 ──
+  // ハチドリ: 接近 + 捕獲、エネルギー消費罰
+  let rH = dDist*.6 - dt*.3;
+  if(spdH===2) rH -= 0.04; // スプリントコスト
+  if(hbird.pos.y>dragon.pos.y+3) rH+=dt*.15; // 高度優位ボーナス → 先々の先を促す
+
+  // トンボ: 生存 + 離脱ボーナス
+  let rD = dt*.5; // 生存報酬
+  rD -= dDist*.35; // 距離維持（接近させるな）
+  if(dist>20) rD += dt*.1; // 安全距離維持ボーナス
+  if(dragon.velAngleAcc>0.6) rD += .08; // 方向転換ボーナス → 後の先行動を促す
+
+  // ── 終了判定 ──
+  let done=false, resultH='timeout', resultD='timeout';
+
+  // ニアミス検出 (後の先の証拠)
+  nearMissTimer-=dt;
+  if(dist<6){
+    nearMissTimer=.8; // ニアミス状態
+  } else if(nearMissTimer>0&&dist>6){
+    // 近かったが逃げた = 成功回避
+    escapeTotal++;
+    onNearMiss(hbird,dragon,[],dAltBuf.slice(-20));
+    rD+=40; rH-=20;
+    nearMissTimer=0;
+    // 指標③ 先読み判定: 距離が中程度(8-20m)の時からトンボが動いていたか
+    const wasPreemptive=prevDist>8&&prevDist<20&&dragon.velAngleAcc>0.5;
+    if(wasPreemptive) {
+      const last=dMetrics.events[dMetrics.events.length-1];
+      if(last) last.preemptive=true;
+      dMetrics.m3=dMetrics.events.filter(e=>e.preemptive).length/Math.max(1,dMetrics.events.length);
+    }
+  }
+
+  if(dist<CATCH_D){
+    rH+=200; rD-=200; done=true; resultH='catch'; resultD='caught';
+    catchTotal++;
+    onCatch(hbird,dragon,t,hSpeedBuf,hVelYBuf);
+    // リスポーン
+    const np=rnd3D(45,hbird.pos,5,28);
+    dragon.pos.copy(np); dragon.vel.set((Math.random()-.5)*2,0,(Math.random()-.5)*2).normalize().multiplyScalar(2);
+    dragon.stamina=1.0; dragon.trail.pts=[]; dragon.velAngleAcc=0;
+    hbird.energy=Math.min(1,hbird.energy+.18);
+  } else if(hbird.energy<=0){
+    rH-=100; done=true; resultH='exhausted'; escapeTotal++;
+  } else if(epTime>=EP_MAX){
+    rD+=20; done=true; // タイムアウト = トンボの生存成功
+    escapeTotal++;
+  }
+
+  hEpR+=rH; dEpR+=rD;
+
+  // ── DQN 更新 ──
+  const ns_h=encodeH(hbird,dragon);
+  const ns_d=encodeD(dragon,hbird);
+  agentH.store(sv_h,act_h,rH,ns_h,done);
+  agentD.store(sv_d,act_d,rD,ns_d,done);
+  if(agentH.step%4===0){ agentH.train(); agentD.train(); }
+
+  if(done){
+    agentH.endEp(resultH,hEpR);
+    agentD.endEp(resultD,dEpR);
+    crHistory.push(catchTotal/(catchTotal+escapeTotal+.001));
+    if(crHistory.length>200) crHistory.shift();
+    hEpR=0; dEpR=0;
+    buildEntities();
+  } else {
+    prevDist=dist;
+  }
+
+  // ビジュアル更新
+  pushTrail3D(hbird.trail,hbird.pos);
+  pushTrail3D(dragon.trail,dragon.pos);
+  updateAltLine(hbird.altLine,hbird.pos);
+  updateAltLine(dragon.altLine,dragon.pos);
+  updateShadow(hbird.shadow,hbird.pos);
+  updateShadow(dragon.shadow,dragon.pos);
+}
+
+// ════════════════════════════════════════════════
+// グラフ
+// ════════════════════════════════════════════════
+function drawGraph(id,data,col,label){
+  const cv=document.getElementById(id);
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.fillRect(0,0,W,H);
+  if(data.length<2)return;
+  const mn=Math.min(...data), mx=Math.max(...data), rng=mx-mn||1;
+  ctx.strokeStyle=col; ctx.lineWidth=1.3; ctx.beginPath();
+  for(let i=0;i<data.length;i++){
+    const x=(i/(data.length-1))*W, y=H-(data[i]-mn)/rng*(H-4)-2;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  if(data.length>15){
+    const w=Math.min(20,Math.floor(data.length/4));
+    ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1; ctx.beginPath();
+    for(let i=w;i<data.length;i++){
+      const avg=data.slice(i-w,i).reduce((a,b)=>a+b,0)/w;
+      const x=(i/(data.length-1))*W, y=H-(avg-mn)/rng*(H-4)-2;
+      i===w?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle='rgba(150,180,255,0.45)'; ctx.font='8px Courier New';
+  ctx.fillText(label,2,10);
+}
+
+// ════════════════════════════════════════════════
+// UI 更新
+// ════════════════════════════════════════════════
+let animT=0;
+function updateUI(){
+  animT+=SIM_DT*speedMult;
+
+  // 翼アニメーション
+  if(hbird.wL){
+    const flap=Math.sin(animT*55)*0.4;
+    hbird.wL.rotation.z= .25+flap; hbird.wR.rotation.z=-.25-flap;
+  }
+  if(dragon.wings){
+    dragon.wings.forEach((w,i)=>{ w.rotation.z=(i%2===0?1:-1)*Math.sin(animT*28+i*.8)*.12; });
+  }
+
+  // ハチドリ
+  const he=Math.round(hbird.energy*100);
+  document.getElementById('h-epct').textContent=he;
+  document.getElementById('h-ebar').style.width=he+'%';
+  document.getElementById('h-ebar').style.background=he>50?'#ff6699':he>20?'#ffaa44':'#446677';
+  document.getElementById('h-alt').textContent=hbird.pos.y.toFixed(1);
+  document.getElementById('h-spd').textContent=hbird.vel.length().toFixed(1);
+  document.getElementById('h-catch').textContent=catchTotal;
+  const act_h_info=hbird.vel.length()>19?'SPRINT':hbird.vel.length()>9?'CRUISE':'SLOW';
+  const h_bg={'SPRINT':'#882244','CRUISE':'#553322','SLOW':'#334455'};
+  document.getElementById('h-badge').textContent=act_h_info;
+  document.getElementById('h-badge').style.background=h_bg[act_h_info];
+
+  // トンボ
+  const de=Math.round(dragon.stamina*100);
+  document.getElementById('d-epct').textContent=de;
+  document.getElementById('d-ebar').style.width=de+'%';
+  document.getElementById('d-ebar').style.background=de>50?'#22ddcc':de>20?'#aadd44':'#446655';
+  document.getElementById('d-alt').textContent=dragon.pos.y.toFixed(1);
+  document.getElementById('d-spd').textContent=dragon.vel.length().toFixed(1);
+  document.getElementById('d-esc').textContent=escapeTotal;
+  const d_state=dragon.recentlyManeuvered?'MANEUVER':'CRUISE';
+  document.getElementById('d-badge').textContent=d_state;
+  document.getElementById('d-badge').style.background=dragon.recentlyManeuvered?'#116655':'#115555';
+
+  // 距離・高度差
+  const dist3d=hbird.pos.distanceTo(dragon.pos);
+  document.getElementById('dist3d').textContent=dist3d.toFixed(1)+' m';
+  const dy=(hbird.pos.y-dragon.pos.y);
+  document.getElementById('alt-diff').textContent='Δy:'+(dy>0?'+':'')+dy.toFixed(1)+'m';
+  document.getElementById('alt-diff').style.color=dy>3?'#ff9aaa':dy<-3?'#55eecc':'#aaaaff';
+
+  // RL stats
+  document.getElementById('rl-ep').textContent=agentH.episode;
+  document.getElementById('rl-eps').textContent=agentH.eps.toFixed(3)+' / '+agentD.eps.toFixed(3);
+  const cr=catchTotal+escapeTotal>0?Math.round(catchTotal/(catchTotal+escapeTotal)*100):0;
+  document.getElementById('rl-cr').textContent=`${catchTotal}/${catchTotal+escapeTotal} (${cr}%)`;
+  document.getElementById('rl-et').textContent=epTime.toFixed(1)+'s';
+  document.getElementById('rl-buf').textContent=agentH.buf.length+'/'+agentD.buf.length;
+
+  // アームズレース
+  const hWin=cr/100, dWin=1-hWin;
+  document.getElementById('arms-h').style.width=(hWin*50)+'%';
+  document.getElementById('arms-d').style.width=(dWin*50)+'%';
+  document.getElementById('arms-lbl').textContent=cr>55?'ハチドリ優勢':cr<45?'トンボ優勢':'均衡';
+
+  // ハチドリ指標
+  const setBar=(id,v)=>{ const p=Math.round(v*100); document.getElementById(id+'v').textContent=p+'%'; document.getElementById(id+'b').style.width=p+'%'; };
+  setBar('h1',hMetrics.m1); setBar('h2',hMetrics.m2); setBar('h3',hMetrics.m3); setBar('h4',hMetrics.m4);
+  setBar('d1',dMetrics.m1); setBar('d2',dMetrics.m2); setBar('d3',dMetrics.m3); setBar('d4',dMetrics.m4);
+
+  // グラフ
+  drawGraph('g-h',agentH.rwHist,'#ff6699','ハチドリ報酬');
+  drawGraph('g-d',agentD.rwHist,'#22ddcc','トンボ報酬');
+
+  // トレイル表示
+  hbird.trail.line.visible=showTrails;
+  dragon.trail.line.visible=showTrails;
+}
+
+// ════════════════════════════════════════════════
+// メインループ
+// ════════════════════════════════════════════════
+let lastT=null;
+function animate(ts){
+  requestAnimationFrame(animate);
+  if(!lastT){lastT=ts;return;}
+  const rawDt=Math.min((ts-lastT)/1000,.1);
+  lastT=ts;
+
+  if(!paused&&hbird&&dragon){
+    const steps=Math.max(1,Math.floor(speedMult*rawDt/SIM_DT));
+    for(let i=0;i<steps;i++){
+      simStep();
+      if(!hbird||!dragon)break;
+    }
+    updateUI();
+  }
+  tickCam();
+  renderer.render(scene,cam);
+}
+
+// ════════════════════════════════════════════════
+// コントロール
+// ════════════════════════════════════════════════
+function setTrainMode(m){
+  trainMode=m;
+  document.getElementById('tab-ind').classList.toggle('on',m==='ind');
+  document.getElementById('tab-sp').classList.toggle('on',m==='sp');
+}
+function toggleTest(){
+  testMode=!testMode;
+  document.getElementById('btn-test').classList.toggle('on',testMode);
+  document.getElementById('btn-test').textContent=testMode?'🎓 訓練に戻す':'🎯 テスト';
+}
+function toggleTrails(){
+  showTrails=!showTrails;
+  document.getElementById('btn-trails').classList.toggle('on',showTrails);
+}
+
+document.getElementById('btn-rst').addEventListener('click',()=>{
+  agentH=new DQNAgent('hbird'); agentD=new DQNAgent('dragon');
+  catchTotal=0; escapeTotal=0; crHistory=[];
+  hMetrics.events=[]; dMetrics.events=[];
+  hMetrics.m1=hMetrics.m2=hMetrics.m3=hMetrics.m4=0;
+  dMetrics.m1=dMetrics.m2=dMetrics.m3=dMetrics.m4=0;
+  buildEntities();
+});
+document.getElementById('btn-pause').addEventListener('click',function(){
+  paused=!paused; this.textContent=paused?'▶ 再開':'⏸ 停止';
+});
+document.getElementById('btn-cam').addEventListener('click',()=>{
+  camMode=(camMode+1)%4;
+  document.getElementById('camlab').textContent=CAM_NAMES[camMode];
+});
+document.getElementById('spd').addEventListener('input',function(){
+  speedMult=parseInt(this.value);
+  document.getElementById('spd-lbl').textContent=speedMult+' ×';
+});
+
+window.addEventListener('resize',()=>{
+  cam.aspect=innerWidth/innerHeight;
+  cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// 起動
+buildEntities();
+animate(0);
+</script>
+</body>
+</html>

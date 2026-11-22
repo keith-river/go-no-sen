@@ -33,6 +33,7 @@ canvas{display:block}
     <div class="blbl">🤝 連携スコア（累積）</div>
     <div class="bbg"><div class="bf" id="cf" style="width:0%"></div></div>
   </div>
+  <div class="panel" style="font-size:11px;color:#4b5563">🖱️ ドラッグで視点回転 / ホイールでズーム</div>
   <div class="panel" id="log">学習ログ...</div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -58,8 +59,29 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x000d1a);
 scene.fog=new THREE.FogExp2(0x001a33,0.012);
 const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.5,250);
-cam.position.set(0,38,70);cam.lookAt(0,0,0);
 window.addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();rdr.setSize(innerWidth,innerHeight);});
+
+// ── ORBIT CONTROLS ──
+let camTheta=0.4,camPhi=0.55,camR=85;
+const camTgt=new THREE.Vector3(0,0,0);
+function updCam(){
+  cam.position.set(
+    camTgt.x+camR*Math.sin(camPhi)*Math.sin(camTheta),
+    camTgt.y+camR*Math.cos(camPhi),
+    camTgt.z+camR*Math.sin(camPhi)*Math.cos(camTheta));
+  cam.lookAt(camTgt);
+}
+updCam();
+let drag=false,lmx=0,lmy=0;
+rdr.domElement.addEventListener('mousedown',e=>{drag=true;lmx=e.clientX;lmy=e.clientY;});
+window.addEventListener('mouseup',()=>drag=false);
+window.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  camTheta-=(e.clientX-lmx)*.005;
+  camPhi=Math.max(.15,Math.min(Math.PI*.85,camPhi+(e.clientY-lmy)*.005));
+  lmx=e.clientX;lmy=e.clientY;updCam();
+});
+rdr.domElement.addEventListener('wheel',e=>{camR=Math.max(25,Math.min(160,camR+e.deltaY*.05));updCam();},{passive:true});
 scene.add(new THREE.AmbientLight(0x112244,1.5));
 const sun=new THREE.DirectionalLight(0x8899cc,1.5);sun.position.set(30,60,40);scene.add(sun);
 const ul=new THREE.PointLight(0x0044aa,1.0,80);ul.position.set(0,-15,0);scene.add(ul);

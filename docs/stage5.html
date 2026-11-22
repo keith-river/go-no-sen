@@ -50,12 +50,12 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 // ── CONFIG ──
-const GW=14; // half-world (28m x 28m)
-const STRIKE=1.5,CAMO_T=1.5;
-const M_SPD=1.5,G_SPD=3.0;
-const A_MOV=8.0,A_STILL=1.8; // alert radii
+const GW=7;  // half-world (14m x 14m) — より密な世界
 const DT=0.05,SPF=5;
-const LRQ=0.15,GAMQ=0.95,ED=0.998,EMIN=0.05;
+const STRIKE=3.5,CAMO_T=DT; // 捕獲圏3.5m、1ステップwaitで即擬態（cold-start回避）
+const M_SPD=1.5,G_SPD=3.0;
+const A_MOV=8.0,A_STILL=0.0; // 擬態中は完全不可視
+const LRQ=0.18,GAMQ=0.95,ED=0.9985,EMIN=0.12;
 const DIRS=[[1,0],[.71,.71],[0,1],[-.71,.71],[-1,0],[-.71,-.71],[0,-1],[.71,-.71]];
 
 // ── SCENE ──
@@ -65,13 +65,21 @@ document.body.appendChild(rdr.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a1f0a);
 scene.fog=new THREE.Fog(0x0a2010,25,80);
 const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,120);
-cam.position.set(0,22,28);cam.lookAt(0,0,0);
+// Orbit controls
+let camTheta=0.4,camPhi=0.55,camR=28,drag=false,lmx=0,lmy=0;
+function updCam(){cam.position.set(camR*Math.sin(camPhi)*Math.sin(camTheta),camR*Math.cos(camPhi),camR*Math.sin(camPhi)*Math.cos(camTheta));cam.lookAt(0,0,0);}
+updCam();
+rdr.domElement.addEventListener('mousedown',e=>{drag=true;lmx=e.clientX;lmy=e.clientY;});
+window.addEventListener('mousemove',e=>{if(!drag)return;camTheta-=(e.clientX-lmx)*.005;camPhi=Math.max(.15,Math.min(Math.PI*.85,camPhi+(e.clientY-lmy)*.005));lmx=e.clientX;lmy=e.clientY;updCam();});
+window.addEventListener('mouseup',()=>drag=false);
+rdr.domElement.addEventListener('wheel',e=>{camR=Math.max(12,Math.min(70,camR+e.deltaY*.05));updCam();},{passive:true});
 window.addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();rdr.setSize(innerWidth,innerHeight);});
 scene.add(new THREE.AmbientLight(0x224422,2.0));
 const sun=new THREE.DirectionalLight(0xaaddaa,1.2);sun.position.set(20,40,20);scene.add(sun);
 
 // Ground
-scene.add(Object.assign(new THREE.Mesh(new THREE.PlaneGeometry(80,80),new THREE.MeshLambertMaterial({color:0x1a3c1a})),{rotation:{x:-Math.PI/2,y:0,z:0}}));
+const gnd=new THREE.Mesh(new THREE.PlaneGeometry(80,80),new THREE.MeshLambertMaterial({color:0x1a3c1a}));
+gnd.rotation.x=-Math.PI/2;scene.add(gnd);
 
 // Grid
 const gMat=new THREE.LineBasicMaterial({color:0x1f4a1f,transparent:true,opacity:0.3});
@@ -124,11 +132,13 @@ function mkGrass(){
 const Q={};
 const gQ=(s,a)=>Q[`${s},${a}`]||0;
 const sQ=(s,a,v)=>{Q[`${s},${a}`]=v;};
+let nearestGDist=GW*2; // 報酬シェーピング用（近接ボーナス計算）
 
 function encState(mpos,mCamo,gs){
   let md=Infinity,mg=null;
   gs.forEach(g=>{const d=mpos.distanceTo(g.pos);if(d<md){md=d;mg=g;}});
-  const dB=md<=STRIKE?0:md<3?1:md<7?2:md<14?3:4;
+  nearestGDist=md; // グローバルに保存して報酬計算に使う
+  const dB=md<=STRIKE?0:md<4?1:md<GW?2:3;
   const ang=mg?Math.atan2(mg.pos.z-mpos.z,mg.pos.x-mpos.x):0;
   const aB=(Math.round((ang/Math.PI+1)*4)+8)%8;
   return`${dB},${aB},${mCamo?1:0}`;
@@ -140,25 +150,26 @@ const mantis={pos:V(0,.2,0),vel:V(),still:0,camo:false,sanim:0,
   get stStr(){return this.camo?'🫥 擬態中':this.vel.length()>.3?'🏃 移動中':'⏸️ 停止中';}};
 
 // ── GRASSHOPPERS ──
-const NUM_G=5;
+const NUM_G=9; // バッタをさらに増やして密度を上げる
 const gs=Array.from({length:NUM_G},()=>{
-  const a=Math.random()*Math.PI*2,r=rnd(4,GW-1);
+  const a=Math.random()*Math.PI*2,r=rnd(1,GW-1);
   const ob={pos:V(Math.cos(a)*r,.2,Math.sin(a)*r),vel:V(),phase:Math.random()*Math.PI*2,mesh:mkGrass()};
   ob.mesh.position.copy(ob.pos);scene.add(ob.mesh);return ob;
 });
-function rspG(g){const a=Math.random()*Math.PI*2,r=rnd(5,GW-1);g.pos.set(Math.cos(a)*r,.2,Math.sin(a)*r);g.vel.set(0,0,0);}
+function rspG(g){const a=Math.random()*Math.PI*2,r=rnd(1,GW-1);g.pos.set(Math.cos(a)*r,.2,Math.sin(a)*r);g.vel.set(0,0,0);}
 function updGs(dt,mpos,mCamo){
   const aR=mCamo?A_STILL:A_MOV;
   gs.forEach(g=>{
     g.phase+=dt*5;
     const dm=g.pos.distanceTo(mpos);
     if(dm<aR){const f=g.pos.clone().sub(mpos).normalize();g.vel.lerp(new THREE.Vector3(f.x,0,f.z).multiplyScalar(G_SPD+2),.4);}
-    else if(Math.random()<.025){const a=Math.random()*Math.PI*2;g.vel.lerp(V(Math.cos(a)*G_SPD,0,Math.sin(a)*G_SPD),.08);}
+    else if(Math.random()<.08){const a=Math.random()*Math.PI*2;g.vel.lerp(V(Math.cos(a)*G_SPD,0,Math.sin(a)*G_SPD),.2);}
     g.vel.multiplyScalar(.94);
     g.pos.x=clamp(g.pos.x+g.vel.x*dt,-GW,GW);
     g.pos.z=clamp(g.pos.z+g.vel.z*dt,-GW,GW);
     g.pos.y=.2+Math.max(0,Math.sin(g.phase)*.22);
-    if(Math.abs(g.pos.x)>=GW)g.vel.x*=-1;if(Math.abs(g.pos.z)>=GW)g.vel.z*=-1;
+    if(Math.abs(g.pos.x)>=GW){g.vel.x*=-1;g.pos.x=clamp(g.pos.x,-GW+.1,GW-.1);}
+    if(Math.abs(g.pos.z)>=GW){g.vel.z*=-1;g.pos.z=clamp(g.pos.z,-GW+.1,GW-.1);}
     g.mesh.position.copy(g.pos);
     if(new THREE.Vector2(g.vel.x,g.vel.z).length()>.3)g.mesh.lookAt(g.pos.clone().add(V(g.vel.x,0,g.vel.z)));
   });
@@ -192,12 +203,16 @@ function step(){
   mantis.pos.z=clamp(mantis.pos.z+mantis.vel.z*DT,-GW,GW);mantis.pos.y=.2;
 
   // Check catch
-  let reward=moved?-.5:(mantis.camo?-.1:-.2);
+  // 二段階移動コスト：遠→安く動いて接近、近→高く動いて待機を促す
+  const nearZone=nearestGDist<STRIKE*1.8; // 捕獲圏の1.8倍以内 = 近距離ゾーン
+  const moveCost=nearZone?-.35:-.05;      // 近くで動くと高ペナルティ
+  let reward=moved?moveCost:(mantis.camo?.05:-.1); // 擬態中待機は微プラス
+  reward+=0.25/(nearestGDist+0.5);
   let caught=false;
   for(const g of gs){
     if(mantis.pos.distanceTo(g.pos)<STRIKE){
       reward+=150;caught=true;ct++;
-      if(mantis.camo)camoCt++;
+      if(mantis.camo){camoCt++;reward+=50;} // 擬態捕獲ボーナス
       wSum+=mantis.still;
       mantis.sanim=.5;rspG(g);
       addLog(`EP${ep}: 捕獲 (${mantis.camo?'🫥擬態':'🏃移動'}) ε=${eps.toFixed(3)}`);
@@ -230,7 +245,7 @@ function updMantis(dt){
   }else{mMesh.userData.lL.rotation.x=1.1;mMesh.userData.rL.rotation.x=1.1;}
   // Camouflage visual
   mMesh.userData.bMat.opacity=mantis.camo?.65:1.0;
-  mMesh.userData.bMat.emissive=mantis.camo?new THREE.Color(0x002200):new THREE.Color(0x000000);
+  mMesh.userData.bMat.emissive.setHex(mantis.camo?0x002200:0x000000);
   // Rings
   srMesh.position.set(mantis.pos.x,.05,mantis.pos.z);
   srMat.opacity=mantis.sanim>.0?.5+mantis.sanim:.12;

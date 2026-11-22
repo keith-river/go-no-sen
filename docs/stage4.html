@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>シャチ vs アザラシ — 3D協調DQN</title>
+<style>
+body{margin:0;background:#000d1a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;overflow:hidden}
+canvas{display:block}
+#ui{position:fixed;top:12px;left:12px;z-index:10;min-width:235px}
+.panel{background:rgba(0,8,24,.88);border:1px solid rgba(0,120,255,.22);border-radius:8px;padding:12px 16px;margin-bottom:8px;font-size:13px}
+.title{font-size:14px;font-weight:700;color:#22d3ee;margin-bottom:8px}
+.row{display:flex;justify-content:space-between;margin:3px 0}
+.lbl{color:#6b7280}.val{color:#e2e8f0;font-weight:600}
+.blbl{font-size:11px;color:#6b7280;margin:5px 0 2px}
+.bbg{background:rgba(255,255,255,.07);border-radius:3px;height:6px}
+.bf{height:6px;border-radius:3px;transition:width .15s}
+#wf{background:linear-gradient(90deg,#0066cc,#22d3ee)}
+#cf{background:linear-gradient(90deg,#4c1d95,#a78bfa)}
+#log{font-size:11px;color:#4b5563;max-height:58px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div class="panel">
+    <div class="title">🐋 シャチ vs アザラシ — 協調DQN</div>
+    <div class="row"><span class="lbl">エピソード</span><span class="val" id="ep">0</span></div>
+    <div class="row"><span class="lbl">累計捕獲</span><span class="val" id="ct">0</span></div>
+    <div class="row"><span class="lbl">ε (探索率)</span><span class="val" id="ep2">1.000</span></div>
+    <div class="row"><span class="lbl">アザラシ状態</span><span class="val" id="ss">🧊 REST</span></div>
+    <div class="blbl">🌊 波紋チャージ（3頭連携）</div>
+    <div class="bbg"><div class="bf" id="wf" style="width:0%"></div></div>
+    <div class="blbl">🤝 連携スコア（累積）</div>
+    <div class="bbg"><div class="bf" id="cf" style="width:0%"></div></div>
+  </div>
+  <div class="panel" id="log">学習ログ...</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+const V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+const rnd=(a,b)=>a+Math.random()*(b-a);
+
+// ── CONFIG ──
+const WORLD=80,DEPTH=40,ICE=10,ICE_H=0.5;
+const CATCH_D=3.0,WAVE_RANGE=20,WAVE_T=2.5;
+const DT=0.05,SPF=4; // sim steps per frame
+const O_SPD=[3,8,14];
+const IN=10,ACT=19,HD=48,RBUF=6000,BATCH=32,SYNC=300;
+const LR=2e-4,GAMMA=0.97,ED=0.9997,EMIN=0.05;
+const SS=['REST','DIVE','SURFACE','FLEE'];
+
+// ── SCENE ──
+const rdr=new THREE.WebGLRenderer({antialias:true});
+rdr.setPixelRatio(devicePixelRatio);rdr.setSize(innerWidth,innerHeight);
+document.body.appendChild(rdr.domElement);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x000d1a);
+scene.fog=new THREE.FogExp2(0x001a33,0.012);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.5,250);
+cam.position.set(0,38,70);cam.lookAt(0,0,0);
+window.addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();rdr.setSize(innerWidth,innerHeight);});
+scene.add(new THREE.AmbientLight(0x112244,1.5));
+const sun=new THREE.DirectionalLight(0x8899cc,1.5);sun.position.set(30,60,40);scene.add(sun);
+const ul=new THREE.PointLight(0x0044aa,1.0,80);ul.position.set(0,-15,0);scene.add(ul);
+
+// Ground & ocean
+const flr=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshLambertMaterial({color:0x001133}));
+flr.rotation.x=-Math.PI/2;flr.position.y=-DEPTH;scene.add(flr);
+const oMat=new THREE.MeshLambertMaterial({color:0x0055aa,transparent:true,opacity:0.42,side:THREE.DoubleSide,depthWrite:false});
+const oMesh=new THREE.Mesh(new THREE.PlaneGeometry(200,200),oMat);
+oMesh.rotation.x=-Math.PI/2;scene.add(oMesh);
+// Ice
+const iceMesh=new THREE.Mesh(new THREE.BoxGeometry(ICE,ICE_H,ICE),new THREE.MeshLambertMaterial({color:0xddeeff}));
+iceMesh.position.y=ICE_H/2;scene.add(iceMesh);
+// Wave ring
+const wrMat=new THREE.MeshBasicMaterial({color:0x44aaff,transparent:true,opacity:0,side:THREE.DoubleSide});
+const wrMesh=new THREE.Mesh(new THREE.RingGeometry(0.5,1,32),wrMat);
+wrMesh.rotation.x=-Math.PI/2;wrMesh.position.y=0.1;scene.add(wrMesh);
+
+// ── MESHES ──
+function mkOrca(){
+  const g=new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(1.6,1.0,5.5),new THREE.MeshLambertMaterial({color:0x0d0d1f})));
+  const b=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.1,3.5),new THREE.MeshLambertMaterial({color:0xeeeeff}));
+  b.position.set(0,-0.5,0.3);g.add(b);
+  const f=new THREE.Mesh(new THREE.BoxGeometry(0.25,1.8,0.6),new THREE.MeshLambertMaterial({color:0x08080f}));
+  f.position.y=1.0;g.add(f);
+  return g;
+}
+function mkSeal(){
+  const g=new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.9,0.65,1.9),new THREE.MeshLambertMaterial({color:0x556070})));
+  const h=new THREE.Mesh(new THREE.BoxGeometry(0.65,0.55,0.65),new THREE.MeshLambertMaterial({color:0x445060}));
+  h.position.set(0,0.1,1.1);g.add(h);return g;
+}
+
+// ── TRAIL ──
+function mkTrail(col,len=60){
+  const geo=new THREE.BufferGeometry();
+  const pts=new Float32Array(len*3);
+  geo.setAttribute('position',new THREE.BufferAttribute(pts,3));
+  geo.setDrawRange(0,0);
+  const ln=new THREE.Line(geo,new THREE.LineBasicMaterial({color:col,transparent:true,opacity:0.45}));
+  scene.add(ln);return{ln,pts,hd:0,cnt:0,len};
+}
+function pushT(t,p){
+  const i=t.hd*3;t.pts[i]=p.x;t.pts[i+1]=p.y;t.pts[i+2]=p.z;
+  t.hd=(t.hd+1)%t.len;if(t.cnt<t.len)t.cnt++;
+  const a=[];for(let k=0;k<t.cnt;k++){const j=((t.hd-t.cnt+k)%t.len+t.len)%t.len;a.push(t.pts[j*3],t.pts[j*3+1],t.pts[j*3+2]);}
+  t.ln.geometry.attributes.position.array.set(a);
+  t.ln.geometry.attributes.position.needsUpdate=true;
+  t.ln.geometry.setDrawRange(0,t.cnt);
+}
+
+// ── DQN ──
+function mkMLP(I,H,O){
+  const r=(n,sc)=>Float64Array.from({length:n},()=>(Math.random()-.5)*sc);
+  return{W1:r(I*H,Math.sqrt(2/I)),b1:new Float64Array(H),W2:r(H*O,Math.sqrt(2/H)),b2:new Float64Array(O),I,H,O};
+}
+function fwd(n,x){
+  const h=new Float64Array(n.H);
+  for(let j=0;j<n.H;j++){let s=n.b1[j];for(let i=0;i<n.I;i++)s+=x[i]*n.W1[i*n.H+j];h[j]=s>0?s:0;}
+  const o=new Float64Array(n.O);
+  for(let k=0;k<n.O;k++){let s=n.b2[k];for(let j=0;j<n.H;j++)s+=h[j]*n.W2[j*n.O+k];o[k]=s;}
+  return{o,h};
+}
+function cpNet(s,d){d.W1.set(s.W1);d.b1.set(s.b1);d.W2.set(s.W2);d.b2.set(s.b2);}
+class DQN{
+  constructor(I,H,O){
+    this.n=mkMLP(I,H,O);this.t=mkMLP(I,H,O);cpNet(this.n,this.t);
+    const z=n=>new Float64Array(n);
+    this.mW1=z(I*H);this.vW1=z(I*H);this.mb1=z(H);this.vb1=z(H);
+    this.mW2=z(H*O);this.vW2=z(H*O);this.mb2=z(O);this.vb2=z(O);
+    this.buf=[];this.s=1;this.I=I;this.H=H;this.O=O;
+  }
+  act(x,eps){
+    if(Math.random()<eps)return Math.floor(Math.random()*this.O);
+    return fwd(this.n,x).o.reduce((b,v,i,a)=>v>a[b]?i:b,0);
+  }
+  push(s,a,r,ns,done){
+    if(this.buf.length>=RBUF)this.buf.splice(0,1);
+    this.buf.push([s,a,r,ns,done]);
+  }
+  sync(){cpNet(this.n,this.t);}
+  train(){
+    if(this.buf.length<BATCH)return;
+    const b1=0.9,b2=0.999,ep=1e-8,lr=LR,{n,I,H,O}=this;
+    for(let bi=0;bi<BATCH;bi++){
+      const[s,a,r,ns,done]=this.buf[Math.floor(Math.random()*this.buf.length)];
+      const{o:qc,h}=fwd(n,s);const{o:qn}=fwd(this.t,ns);
+      const tgt=r+(done?0:GAMMA*Math.max(...qn));const err=tgt-qc[a];
+      const dO=new Float64Array(O);dO[a]=-2*err;
+      for(let j=0;j<H;j++)for(let k=0;k<O;k++){
+        const idx=j*O+k,g=dO[k]*h[j];
+        this.mW2[idx]=b1*this.mW2[idx]+(1-b1)*g;this.vW2[idx]=b2*this.vW2[idx]+(1-b2)*g*g;
+        n.W2[idx]-=lr*(this.mW2[idx]/(1-b1**this.s))/(Math.sqrt(this.vW2[idx]/(1-b2**this.s))+ep);
+      }
+      for(let k=0;k<O;k++){const g=dO[k];
+        this.mb2[k]=b1*this.mb2[k]+(1-b1)*g;this.vb2[k]=b2*this.vb2[k]+(1-b2)*g*g;
+        n.b2[k]-=lr*(this.mb2[k]/(1-b1**this.s))/(Math.sqrt(this.vb2[k]/(1-b2**this.s))+ep);
+      }
+      const dH=new Float64Array(H);
+      for(let j=0;j<H;j++)if(h[j]>0)for(let k=0;k<O;k++)dH[j]+=dO[k]*n.W2[j*O+k];
+      for(let i=0;i<I;i++)for(let j=0;j<H;j++){
+        const idx=i*H+j,g=dH[j]*s[i];
+        this.mW1[idx]=b1*this.mW1[idx]+(1-b1)*g;this.vW1[idx]=b2*this.vW1[idx]+(1-b2)*g*g;
+        n.W1[idx]-=lr*(this.mW1[idx]/(1-b1**this.s))/(Math.sqrt(this.vW1[idx]/(1-b2**this.s))+ep);
+      }
+      for(let j=0;j<H;j++){const g=dH[j];
+        this.mb1[j]=b1*this.mb1[j]+(1-b1)*g;this.vb1[j]=b2*this.vb1[j]+(1-b2)*g*g;
+        n.b1[j]-=lr*(this.mb1[j]/(1-b1**this.s))/(Math.sqrt(this.vb1[j]/(1-b2**this.s))+ep);
+      }
+      this.s++;
+    }
+  }
+}
+
+// ── ACTION SPACE ──
+const BDIRS=[V(1,0,0),V(-1,0,0),V(0,1,0),V(0,-1,0),V(0,0,1),V(0,0,-1)];
+function applyAct(agent,a){
+  if(a===18){agent.vel.multiplyScalar(0.85);return;}
+  agent.vel.lerp(BDIRS[Math.floor(a/3)].clone().multiplyScalar(O_SPD[a%3]),0.3);
+}
+
+// ── STATE ──
+function encOrc(o,orca,seal,wp){
+  const to=seal.pos.clone().sub(o.pos),d=to.length();
+  const al=orca.filter(x=>x!==o);
+  return new Float32Array([
+    Math.tanh(to.x/40),Math.tanh(to.y/20),Math.tanh(to.z/40),
+    Math.min(d/60,1),seal.inWater?1:0,wp,
+    Math.tanh((al[0].pos.x-o.pos.x)/30),Math.tanh((al[0].pos.z-o.pos.z)/30),
+    Math.tanh((al[1].pos.x-o.pos.x)/30),Math.tanh((al[1].pos.z-o.pos.z)/30),
+  ]);
+}
+
+// ── SEAL ──
+const sM=mkSeal();scene.add(sM);const sT=mkTrail(0x88aacc,50);
+const seal={pos:V(0,ICE_H+0.4,0),vel:V(),si:0,tim:0,tgt:null,onIce:true,
+  get inWater(){return this.pos.y<0.3;},get sn(){return SS[this.si];}};
+
+function dIce(p){const dx=Math.max(0,Math.abs(p.x)-ICE/2),dz=Math.max(0,Math.abs(p.z)-ICE/2);return Math.sqrt(dx*dx+dz*dz);}
+
+function updSeal(dt,orca,wt){
+  if(wt&&seal.onIce){seal.onIce=false;seal.si=3;seal.tim=0;seal.pos.set(rnd(-3,3),0,rnd(-3,3));seal.vel.set(rnd(-5,5),-2,rnd(-5,5));}
+  seal.tim+=dt;
+  const nd=Math.min(...orca.map(o=>seal.pos.distanceTo(o.pos)));
+  if(seal.si===0){if(seal.tim>rnd(15,25)){seal.si=1;seal.tim=0;seal.onIce=false;seal.tgt=V(rnd(-35,35),-rnd(5,25),rnd(-35,35));}if(nd<12&&seal.onIce){seal.si=3;seal.tim=0;}}
+  else if(seal.si===1){if(seal.tgt){const to=seal.tgt.clone().sub(seal.pos);if(to.length()<1.5)seal.tgt=null;else seal.vel.lerp(to.normalize().multiplyScalar(6),0.15);}if(seal.tim>rnd(20,30)||nd<8){seal.si=2;seal.tim=0;seal.tgt=V(0,ICE_H+0.4,0);}}
+  else if(seal.si===2){const to=V(0,ICE_H+0.4,0).sub(seal.pos);if(to.length()<1){seal.onIce=true;seal.si=0;seal.tim=0;seal.vel.set(0,0,0);seal.pos.set(0,ICE_H+0.4,0);}else seal.vel.lerp(to.normalize().multiplyScalar(9),0.2);}
+  else if(seal.si===3){let fd=V();orca.forEach(o=>fd.add(seal.pos.clone().sub(o.pos).normalize()));fd.normalize().multiplyScalar(14);seal.vel.lerp(new THREE.Vector3(fd.x,0,fd.z),0.3);if(seal.tim>5)seal.si=1;}
+  seal.vel.multiplyScalar(0.92);seal.pos.add(seal.vel.clone().multiplyScalar(dt));
+  seal.pos.x=Math.max(-WORLD/2,Math.min(WORLD/2,seal.pos.x));seal.pos.z=Math.max(-WORLD/2,Math.min(WORLD/2,seal.pos.z));seal.pos.y=Math.max(-DEPTH,Math.min(ICE_H+0.6,seal.pos.y));
+  sM.position.copy(seal.pos);if(seal.vel.length()>0.5)sM.lookAt(seal.pos.clone().add(seal.vel));
+  pushT(sT,seal.pos);
+}
+function rspSeal(){seal.pos.set(0,ICE_H+0.4,0);seal.vel.set(0,0,0);seal.si=0;seal.tim=0;seal.onIce=true;seal.tgt=null;}
+
+// ── ORCA DATA ──
+const dqn=new DQN(IN,HD,ACT);
+const orca=[
+  {pos:V(-28,-10,-22),vel:V(),mesh:mkOrca(),trail:mkTrail(0x224488,60)},
+  {pos:V(22,-14,-26),vel:V(),mesh:mkOrca(),trail:mkTrail(0x1a3388,60)},
+  {pos:V(-12,-9,28),vel:V(),mesh:mkOrca(),trail:mkTrail(0x2255aa,60)},
+];
+orca.forEach(o=>scene.add(o.mesh));
+
+// ── SIM STATE ──
+let eps=1.0,ep=0,ct=0,sn=0,esn=0,wp=0,cs=0,wa=0;
+const EPMAX=500;
+
+// ── SIM STEP ──
+function simStep(){
+  esn++;
+  // Wave mechanic
+  const nn=orca.filter(o=>dIce(o.pos)<WAVE_RANGE).length;
+  if(!seal.inWater&&nn===3){wp=Math.min(1,wp+DT/WAVE_T);cs=Math.min(1,cs+0.007);}
+  else{wp=Math.max(0,wp-DT*.4);cs=Math.max(0,cs-.001);}
+  const wt=wp>=1.0;if(wt){wp=0;wa=1.0;}
+
+  // Current states + actions
+  const sts=orca.map(o=>encOrc(o,orca,seal,wp));
+  const acts=sts.map(s=>dqn.act(s,eps));
+
+  // Apply physics
+  orca.forEach((o,i)=>{
+    applyAct(o,acts[i]);
+    o.vel.multiplyScalar(0.88);o.pos.add(o.vel.clone().multiplyScalar(DT));
+    o.pos.x=Math.max(-WORLD/2,Math.min(WORLD/2,o.pos.x));
+    o.pos.z=Math.max(-WORLD/2,Math.min(WORLD/2,o.pos.z));
+    o.pos.y=Math.max(-DEPTH,Math.min(5,o.pos.y));
+  });
+  updSeal(DT,orca,wt);
+
+  // Catch check
+  const caught=orca.some(o=>seal.inWater&&o.pos.distanceTo(seal.pos)<CATCH_D);
+  const nSts=orca.map(o=>encOrc(o,orca,seal,wp));
+
+  // Push transitions
+  orca.forEach((o,i)=>{
+    let r=-0.005;
+    const d=seal.pos.distanceTo(o.pos);
+    if(seal.inWater)r+=0.25/(d+1);
+    else r+=0.015*Math.max(0,1-dIce(o.pos)/WAVE_RANGE);
+    if(caught)r+=100;
+    dqn.push(sts[i],acts[i],r,nSts[i],caught);
+  });
+
+  dqn.train();sn++;if(sn%SYNC===0)dqn.sync();
+  eps=Math.max(EMIN,eps*ED);
+
+  // Mesh + trail
+  orca.forEach(o=>{
+    o.mesh.position.copy(o.pos);if(o.vel.length()>0.5)o.mesh.lookAt(o.pos.clone().add(o.vel));
+    pushT(o.trail,o.pos);
+  });
+
+  if(caught){ct++;rspSeal();orca.forEach(o=>rspOrca(o));esn=0;ep++;addLog(`EP${ep}: 捕獲！ε=${eps.toFixed(3)}`);}
+  if(esn>EPMAX){rspSeal();orca.forEach(o=>rspOrca(o));esn=0;ep++;}
+}
+function rspOrca(o){o.pos.set(rnd(-WORLD*.4,WORLD*.4),-rnd(5,20),rnd(-WORLD*.4,WORLD*.4));o.vel.set(0,0,0);}
+
+// ── UI ──
+function addLog(m){const el=document.getElementById('log');el.innerHTML=m+'<br>'+el.innerHTML;const ls=el.innerHTML.split('<br>');if(ls.length>7)el.innerHTML=ls.slice(0,7).join('<br>');}
+function uiUp(){
+  document.getElementById('ep').textContent=ep;
+  document.getElementById('ct').textContent=ct;
+  document.getElementById('ep2').textContent=eps.toFixed(3);
+  document.getElementById('ss').textContent=seal.inWater?'🌊 '+seal.sn:'🧊 '+seal.sn;
+  document.getElementById('wf').style.width=(wp*100).toFixed(1)+'%';
+  document.getElementById('cf').style.width=(cs*100).toFixed(1)+'%';
+}
+function updWave(dt){
+  if(wa>0){wa=Math.max(0,wa-dt*.5);const sc=(1-wa)*28;
+  wrMesh.scale.set(sc||1,sc||1,1);wrMat.opacity=wa*.6;wrMesh.visible=wa>0;}
+}
+
+// ── RENDER ──
+let last=performance.now();
+(function loop(){
+  requestAnimationFrame(loop);
+  const now=performance.now(),dt=Math.min((now-last)/1000,.1);last=now;
+  for(let i=0;i<SPF;i++)simStep();
+  updWave(dt);uiUp();
+  oMat.opacity=.42+Math.sin(now*.0008)*.05;
+  rdr.render(scene,cam);
+})();
+</script>
+</body>
+</html>

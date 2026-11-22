@@ -163,6 +163,8 @@
   .card.s1 .card-stage { background: rgba(167,139,250,0.15); color: var(--accent2); }
   .card.s2 .card-stage { background: rgba(34,211,238,0.12); color: var(--accent); }
   .card.s3 .card-stage { background: rgba(52,211,153,0.12); color: var(--accent3); }
+  .card.s4 .card-stage { background: rgba(14,165,233,0.15); color: #38bdf8; }
+  .card.s5 .card-stage { background: rgba(251,191,36,0.12); color: var(--warn); }
   .card-visual {
     height: 110px;
     display: flex;
@@ -211,6 +213,8 @@
   .btn-play:hover { opacity: 0.85; }
   .card.s2 .btn-play { background: var(--accent); }
   .card.s3 .btn-play { background: var(--accent3); }
+  .card.s4 .btn-play { background: #38bdf8; }
+  .card.s5 .btn-play { background: var(--warn); }
 
   /* ── Regional Message ── */
   .message-block {
@@ -345,6 +349,43 @@
 
   </div>
 
+    <!-- Stage 4 -->
+    <a class="card s4" href="stage4.html">
+      <div class="card-stage">Stage 4 — 3D Cooperative DQN</div>
+      <div class="card-visual">🐋🦭</div>
+      <div class="card-body">
+        <h3>シャチ vs アザラシ</h3>
+        <p>3頭のシャチが<strong style="color:#38bdf8">共有DQN</strong>で協調学習。3頭が氷上に同時接近すると<strong style="color:#38bdf8">波紋チャージ</strong>が溜まり、アザラシを海中に突き落とす集団戦術が自発的に出現するかを検証。</p>
+      </div>
+      <div class="card-tech">
+        <span class="tag">パラメータ共有DQN</span>
+        <span class="tag">3D海中</span>
+        <span class="tag">波紋チャージ</span>
+        <span class="tag">集団知性</span>
+      </div>
+      <div class="card-footer">
+        <span class="btn-play">▶ 開く</span>
+      </div>
+    </a>
+
+    <!-- Stage 5 -->
+    <a class="card s5" href="stage5.html">
+      <div class="card-stage">Stage 5 — Ambush Q-Learning</div>
+      <div class="card-visual">🦗🌿</div>
+      <div class="card-body">
+        <h3>カマキリ vs バッタ</h3>
+        <p>「待ちの先」の極致。静止すると<strong style="color:var(--warn)">擬態モード</strong>に入り、バッタに検知されなくなる。Q学習が進むにつれ<strong style="color:var(--warn)">擬態捕捉率・平均待機時間・移動効率</strong>の3指標が改善する様子を観察。</p>
+      </div>
+      <div class="card-tech">
+        <span class="tag">Q-Table</span>
+        <span class="tag">擬態メカニクス</span>
+        <span class="tag">後の先指標×3</span>
+      </div>
+      <div class="card-footer">
+        <span class="btn-play">▶ 開く</span>
+      </div>
+    </a>
+
   <!-- Regional Message -->
   <div class="message-block">
     <h2>🐸 ゆでカエル、になっていませんか？</h2>
@@ -366,6 +407,8 @@
     <a href="stage1.html">Stage 1</a>
     <a href="stage2.html">Stage 2/3</a>
     <a href="stage3.html">Stage 3 Aerial</a>
+    <a href="stage4.html">Stage 4 Orca</a>
+    <a href="stage5.html">Stage 5 Mantis</a>
   </div>
   <div>© 2026 keithrive — MIT License</div>
 </footer>

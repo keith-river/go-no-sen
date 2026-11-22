@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>カマキリ vs バッタ — 待ちの先 × Q学習</title>
+<style>
+body{margin:0;background:#0a1f0a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;overflow:hidden}
+canvas{display:block}
+#ui{position:fixed;top:12px;left:12px;z-index:10;min-width:235px}
+.panel{background:rgba(5,20,5,.9);border:1px solid rgba(0,180,60,.22);border-radius:8px;padding:12px 16px;margin-bottom:8px;font-size:13px}
+.title{font-size:14px;font-weight:700;margin-bottom:8px}
+.row{display:flex;justify-content:space-between;margin:3px 0}
+.lbl{color:#6b7280}.val{color:#e2e8f0;font-weight:600}
+.blbl{font-size:11px;color:#6b7280;margin:5px 0 2px;display:flex;justify-content:space-between}
+.blbl .bv{color:#e2e8f0;font-weight:600}
+.bbg{background:rgba(255,255,255,.07);border-radius:3px;height:6px}
+.bf{height:6px;border-radius:3px;transition:width .3s}
+#cm{background:linear-gradient(90deg,#065f46,#34d399)}
+#wt{background:linear-gradient(90deg,#1e3a5f,#60a5fa)}
+#ef{background:linear-gradient(90deg,#4c1d95,#a78bfa)}
+#log{font-size:11px;color:#4b5563;max-height:58px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div class="panel">
+    <div class="title" style="color:#34d399">🦗 カマキリ vs バッタ — 後の先Q学習</div>
+    <div class="row"><span class="lbl">エピソード</span><span class="val" id="ep">0</span></div>
+    <div class="row"><span class="lbl">累計捕獲</span><span class="val" id="ct">0</span></div>
+    <div class="row"><span class="lbl">ε (探索率)</span><span class="val" id="eps">1.000</span></div>
+    <div class="row"><span class="lbl">カマキリ状態</span><span class="val" id="ms">移動中</span></div>
+  </div>
+  <div class="panel">
+    <div class="title" style="color:#fbbf24;font-size:13px">🎯 後の先メトリクス</div>
+    <div class="blbl"><span>擬態捕捉率</span><span class="bv" id="cv">0%</span></div>
+    <div class="bbg"><div class="bf" id="cm" style="width:0%"></div></div>
+    <div class="blbl"><span>平均待機時間</span><span class="bv" id="wv">0.0s</span></div>
+    <div class="bbg"><div class="bf" id="wt" style="width:0%"></div></div>
+    <div class="blbl"><span>移動効率（捕/移）</span><span class="bv" id="ev">0.000</span></div>
+    <div class="bbg"><div class="bf" id="ef" style="width:0%"></div></div>
+  </div>
+  <div class="panel" id="log">学習ログ...</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+const V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+// ── CONFIG ──
+const GW=14; // half-world (28m x 28m)
+const STRIKE=1.5,CAMO_T=1.5;
+const M_SPD=1.5,G_SPD=3.0;
+const A_MOV=8.0,A_STILL=1.8; // alert radii
+const DT=0.05,SPF=5;
+const LRQ=0.15,GAMQ=0.95,ED=0.998,EMIN=0.05;
+const DIRS=[[1,0],[.71,.71],[0,1],[-.71,.71],[-1,0],[-.71,-.71],[0,-1],[.71,-.71]];
+
+// ── SCENE ──
+const rdr=new THREE.WebGLRenderer({antialias:true});
+rdr.setPixelRatio(devicePixelRatio);rdr.setSize(innerWidth,innerHeight);
+document.body.appendChild(rdr.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a1f0a);
+scene.fog=new THREE.Fog(0x0a2010,25,80);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,120);
+cam.position.set(0,22,28);cam.lookAt(0,0,0);
+window.addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();rdr.setSize(innerWidth,innerHeight);});
+scene.add(new THREE.AmbientLight(0x224422,2.0));
+const sun=new THREE.DirectionalLight(0xaaddaa,1.2);sun.position.set(20,40,20);scene.add(sun);
+
+// Ground
+scene.add(Object.assign(new THREE.Mesh(new THREE.PlaneGeometry(80,80),new THREE.MeshLambertMaterial({color:0x1a3c1a})),{rotation:{x:-Math.PI/2,y:0,z:0}}));
+
+// Grid
+const gMat=new THREE.LineBasicMaterial({color:0x1f4a1f,transparent:true,opacity:0.3});
+for(let i=-3;i<=3;i++){
+  const lh=new THREE.BufferGeometry().setFromPoints([V(-GW,.01,i*4),V(GW,.01,i*4)]);
+  const lv=new THREE.BufferGeometry().setFromPoints([V(i*4,.01,-GW),V(i*4,.01,GW)]);
+  scene.add(new THREE.Line(lh,gMat),new THREE.Line(lv,gMat));
+}
+
+// Vegetation
+const vegMat=new THREE.MeshLambertMaterial({color:0x1a5c1a});
+for(let k=0;k<16;k++){
+  let x,z;do{x=rnd(-GW+1,GW-1);z=rnd(-GW+1,GW-1);}while(Math.abs(x)<2.5&&Math.abs(z)<2.5);
+  const h=rnd(.6,2.2),r=rnd(.3,.55);
+  const v=new THREE.Mesh(new THREE.CylinderGeometry(r,r*.8,h,8),vegMat);
+  v.position.set(x,h/2,z);scene.add(v);
+}
+
+// Strike ring (always shows range, brightens on catch)
+const srMat=new THREE.MeshBasicMaterial({color:0x34d399,transparent:true,opacity:.12,side:THREE.DoubleSide});
+const srMesh=new THREE.Mesh(new THREE.RingGeometry(.1,STRIKE,24),srMat);
+srMesh.rotation.x=-Math.PI/2;srMesh.position.y=.05;scene.add(srMesh);
+// Alert ring
+const arMat=new THREE.MeshBasicMaterial({color:0xef4444,transparent:true,opacity:0,side:THREE.DoubleSide});
+const arMesh=new THREE.Mesh(new THREE.RingGeometry(STRIKE+.1,A_MOV,32),arMat);
+arMesh.rotation.x=-Math.PI/2;arMesh.position.y=.04;scene.add(arMesh);
+
+// ── MESH BUILDERS ──
+function mkMantis(){
+  const g=new THREE.Group();
+  const bMat=new THREE.MeshLambertMaterial({color:0x228833,transparent:true,opacity:1});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.3,.25,1.2),bMat);
+  g.add(body);g.userData.body=body;g.userData.bMat=bMat;
+  const hd=new THREE.Mesh(new THREE.BoxGeometry(.28,.28,.28),new THREE.MeshLambertMaterial({color:0x1a6628}));
+  hd.position.set(0,.05,.7);g.add(hd);
+  const lMat=new THREE.MeshLambertMaterial({color:0x33aa44});
+  const lL=new THREE.Mesh(new THREE.BoxGeometry(.07,.48,.07),lMat);lL.position.set(-.2,.1,.5);lL.rotation.x=1.1;
+  const rL=lL.clone();rL.position.set(.2,.1,.5);
+  g.add(lL,rL);g.userData.lL=lL;g.userData.rL=rL;
+  return g;
+}
+function mkGrass(){
+  const g=new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(.22,.18,.5),new THREE.MeshLambertMaterial({color:0x88cc44})));
+  const hd=new THREE.Mesh(new THREE.BoxGeometry(.18,.18,.18),new THREE.MeshLambertMaterial({color:0x66aa33}));
+  hd.position.set(0,.05,.3);g.add(hd);return g;
+}
+
+// ── Q-TABLE ──
+const Q={};
+const gQ=(s,a)=>Q[`${s},${a}`]||0;
+const sQ=(s,a,v)=>{Q[`${s},${a}`]=v;};
+
+function encState(mpos,mCamo,gs){
+  let md=Infinity,mg=null;
+  gs.forEach(g=>{const d=mpos.distanceTo(g.pos);if(d<md){md=d;mg=g;}});
+  const dB=md<=STRIKE?0:md<3?1:md<7?2:md<14?3:4;
+  const ang=mg?Math.atan2(mg.pos.z-mpos.z,mg.pos.x-mpos.x):0;
+  const aB=(Math.round((ang/Math.PI+1)*4)+8)%8;
+  return`${dB},${aB},${mCamo?1:0}`;
+}
+
+// ── MANTIS ──
+const mMesh=mkMantis();mMesh.position.y=.2;scene.add(mMesh);
+const mantis={pos:V(0,.2,0),vel:V(),still:0,camo:false,sanim:0,
+  get stStr(){return this.camo?'🫥 擬態中':this.vel.length()>.3?'🏃 移動中':'⏸️ 停止中';}};
+
+// ── GRASSHOPPERS ──
+const NUM_G=5;
+const gs=Array.from({length:NUM_G},()=>{
+  const a=Math.random()*Math.PI*2,r=rnd(4,GW-1);
+  const ob={pos:V(Math.cos(a)*r,.2,Math.sin(a)*r),vel:V(),phase:Math.random()*Math.PI*2,mesh:mkGrass()};
+  ob.mesh.position.copy(ob.pos);scene.add(ob.mesh);return ob;
+});
+function rspG(g){const a=Math.random()*Math.PI*2,r=rnd(5,GW-1);g.pos.set(Math.cos(a)*r,.2,Math.sin(a)*r);g.vel.set(0,0,0);}
+function updGs(dt,mpos,mCamo){
+  const aR=mCamo?A_STILL:A_MOV;
+  gs.forEach(g=>{
+    g.phase+=dt*5;
+    const dm=g.pos.distanceTo(mpos);
+    if(dm<aR){const f=g.pos.clone().sub(mpos).normalize();g.vel.lerp(new THREE.Vector3(f.x,0,f.z).multiplyScalar(G_SPD+2),.4);}
+    else if(Math.random()<.025){const a=Math.random()*Math.PI*2;g.vel.lerp(V(Math.cos(a)*G_SPD,0,Math.sin(a)*G_SPD),.08);}
+    g.vel.multiplyScalar(.94);
+    g.pos.x=clamp(g.pos.x+g.vel.x*dt,-GW,GW);
+    g.pos.z=clamp(g.pos.z+g.vel.z*dt,-GW,GW);
+    g.pos.y=.2+Math.max(0,Math.sin(g.phase)*.22);
+    if(Math.abs(g.pos.x)>=GW)g.vel.x*=-1;if(Math.abs(g.pos.z)>=GW)g.vel.z*=-1;
+    g.mesh.position.copy(g.pos);
+    if(new THREE.Vector2(g.vel.x,g.vel.z).length()>.3)g.mesh.lookAt(g.pos.clone().add(V(g.vel.x,0,g.vel.z)));
+  });
+}
+
+// ── Q LEARNING ──
+let eps=1.0,ep=0,ct=0,esn=0,mvSt=0;
+let camoCt=0,wSum=0;
+const EPMAX=600;
+
+function step(){
+  esn++;
+  const curS=encState(mantis.pos,mantis.camo,gs);
+  // ε-greedy
+  let act;
+  if(Math.random()<eps){act=Math.floor(Math.random()*9);}
+  else{let best=-Infinity,ba=8;for(let a=0;a<9;a++){const q=gQ(curS,a);if(q>best){best=q;ba=a;}}act=ba;}
+
+  // Apply
+  let moved=false;
+  if(act<8){const[dx,dz]=DIRS[act];mantis.vel.lerp(V(dx*M_SPD,0,dz*M_SPD),.5);moved=true;mvSt++;}
+  else mantis.vel.multiplyScalar(.5);
+
+  // Camouflage timer
+  if(moved){mantis.still=0;mantis.camo=false;}
+  else{mantis.still+=DT;mantis.camo=mantis.still>CAMO_T;}
+
+  // Physics
+  mantis.vel.multiplyScalar(.85);
+  mantis.pos.x=clamp(mantis.pos.x+mantis.vel.x*DT,-GW,GW);
+  mantis.pos.z=clamp(mantis.pos.z+mantis.vel.z*DT,-GW,GW);mantis.pos.y=.2;
+
+  // Check catch
+  let reward=moved?-.5:(mantis.camo?-.1:-.2);
+  let caught=false;
+  for(const g of gs){
+    if(mantis.pos.distanceTo(g.pos)<STRIKE){
+      reward+=150;caught=true;ct++;
+      if(mantis.camo)camoCt++;
+      wSum+=mantis.still;
+      mantis.sanim=.5;rspG(g);
+      addLog(`EP${ep}: 捕獲 (${mantis.camo?'🫥擬態':'🏃移動'}) ε=${eps.toFixed(3)}`);
+      break;
+    }
+  }
+
+  // TD update
+  const nxtS=encState(mantis.pos,mantis.camo,gs);
+  let mxQ=-Infinity;for(let a=0;a<9;a++)mxQ=Math.max(mxQ,gQ(nxtS,a));
+  const tgt=reward+GAMQ*mxQ;
+  sQ(curS,act,gQ(curS,act)+LRQ*(tgt-gQ(curS,act)));
+  eps=Math.max(EMIN,eps*ED);
+
+  if(caught||esn>EPMAX){esn=0;ep++;rspMantis();}
+}
+
+function rspMantis(){const a=Math.random()*Math.PI*2,r=rnd(1,GW-2);mantis.pos.set(Math.cos(a)*r,.2,Math.sin(a)*r);mantis.vel.set(0,0,0);mantis.still=0;mantis.camo=false;}
+
+// ── VISUALS ──
+function updMantis(dt){
+  mMesh.position.copy(mantis.pos);
+  if(mantis.vel.length()>.3)mMesh.lookAt(mantis.pos.clone().add(mantis.vel));
+  // Leg strike animation
+  if(mantis.sanim>0){
+    mantis.sanim=Math.max(0,mantis.sanim-dt);
+    const ph=((.5-mantis.sanim)/.5)*Math.PI;
+    const ext=Math.sin(ph)*.95;
+    mMesh.userData.lL.rotation.x=1.1-ext;mMesh.userData.rL.rotation.x=1.1-ext;
+  }else{mMesh.userData.lL.rotation.x=1.1;mMesh.userData.rL.rotation.x=1.1;}
+  // Camouflage visual
+  mMesh.userData.bMat.opacity=mantis.camo?.65:1.0;
+  mMesh.userData.bMat.emissive=mantis.camo?new THREE.Color(0x002200):new THREE.Color(0x000000);
+  // Rings
+  srMesh.position.set(mantis.pos.x,.05,mantis.pos.z);
+  srMat.opacity=mantis.sanim>.0?.5+mantis.sanim:.12;
+  arMesh.position.set(mantis.pos.x,.04,mantis.pos.z);
+  arMat.opacity=(!mantis.camo&&mantis.vel.length()>.3)?.1:0;
+}
+
+// ── UI ──
+function addLog(m){const el=document.getElementById('log');el.innerHTML=m+'<br>'+el.innerHTML;const ls=el.innerHTML.split('<br>');if(ls.length>7)el.innerHTML=ls.slice(0,7).join('<br>');}
+function uiUp(){
+  document.getElementById('ep').textContent=ep;
+  document.getElementById('ct').textContent=ct;
+  document.getElementById('eps').textContent=eps.toFixed(3);
+  document.getElementById('ms').textContent=mantis.stStr;
+  const cp=ct>0?(camoCt/ct*100).toFixed(0)+'%':'0%';
+  document.getElementById('cv').textContent=cp;
+  document.getElementById('cm').style.width=ct>0?(camoCt/ct*100)+'%':'0%';
+  const wa=ct>0?(wSum/ct).toFixed(1)+'s':'0.0s';
+  document.getElementById('wv').textContent=wa;
+  const maxWT=12;document.getElementById('wt').style.width=ct>0?Math.min(wSum/ct/maxWT*100,100)+'%':'0%';
+  const eff=mvSt>0?(ct/mvSt).toFixed(3):'0.000';
+  document.getElementById('ev').textContent=eff;
+  const maxE=.04;document.getElementById('ef').style.width=mvSt>0?Math.min(ct/mvSt/maxE*100,100)+'%':'0%';
+}
+
+// ── RENDER ──
+let last=performance.now();
+(function loop(){
+  requestAnimationFrame(loop);
+  const now=performance.now(),dt=Math.min((now-last)/1000,.1);last=now;
+  for(let i=0;i<SPF;i++){step();updGs(DT,mantis.pos,mantis.camo);}
+  updMantis(dt);uiUp();
+  rdr.render(scene,cam);
+})();
+</script>
+</body>
+</html>
